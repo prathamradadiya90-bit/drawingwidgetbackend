@@ -1,0 +1,32 @@
+{
+  "name": "drawing-widget-ios-backend",
+  "version": "1.0.0",
+  "description": "Backend API for Drawing Widget iOS application",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "db:migrate": "node src/database/migrate.js",
+    "test": "node test/test_multiplayer.js"
+  },
+  "keywords": [
+    "nodejs",
+    "express",
+    "ios-backend",
+    "drawing-widget"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.8",
+    "express": "^5.3.0",
+    "morgan": "^1.12.1",
+    "pg": "^8.23.1",
+    "socket.io": "^4.8.4"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.4"
+  }
+}

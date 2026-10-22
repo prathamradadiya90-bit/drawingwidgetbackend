@@ -1,93 +1,146 @@
-# drawing-widget-ios-backend
+# Drawing Widget iOS Backend
 
+Production-ready Node.js (ES Modules) backend API with **Multiplayer Rooms** and **Real-Time Live Drawing** for the Drawing Widget application.
 
+---
 
-## Getting started
+## Features
+- **Multiplayer Room System**:
+  - Room creation with unique 6-character room codes (e.g. `S3W7FZ`).
+  - Host and guest slot allocation (2 to 4 player slots).
+  - Atomic concurrency protection with PostgreSQL transactions (`FOR UPDATE` locking).
+  - Platform check & slot retention on player reconnect.
+- **Live Drawing & Real-Time Synchronization**:
+  - Ultra low-latency point streaming (`stroke:move`) for instantaneous pen tracking.
+  - Asynchronous stroke persistence (`stroke:add` -> PostgreSQL `room_strokes`).
+  - Stroke erasing and canvas backfill on room join.
+  - Token-bucket rate limiting (50 ops/sec, burst 200) to protect against spam.
+  - Multi-platform support (`ios` with `PKDrawing` base64 & `android`).
+- **Clean Architecture & Maintainability**:
+  - Separation of Concerns: Config, Controllers, Services, Middlewares, Sockets, Helpers.
+  - Automated database schema migrations (`npm run db:migrate`).
+  - Graceful shutdown for HTTP server, Socket.IO, and PostgreSQL connection pool.
+  - End-to-end automated integration tests (`npm test`).
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+---
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+## Project Structure
 
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
+```text
+.
+├── .env                              # Environment variables
+├── .env.example                      # Environment variables template
+├── package.json
+├── src/
+│   ├── app.js                        # Express app, health checks & middlewares
+│   ├── server.js                     # HTTP server, Socket.IO & graceful shutdown
+│   ├── config/
+│   │   ├── index.js                  # Centralized configuration
+│   │   └── db.js                     # PostgreSQL connection pool & transaction helper
+│   ├── controllers/
+│   │   └── room.controller.js        # Multiplayer HTTP controllers
+│   ├── database/
+│   │   ├── schema.sql                # Tables, indexes, and constraints
+│   │   └── migrate.js               # Database migration runner
+│   ├── helpers/
+│   │   ├── constants.js              # Socket events, limits, room rules
+│   │   ├── logger.js                 # Structured logger
+│   │   └── response.helper.js        # Standardized API response wrappers
+│   ├── middlewares/
+│   │   ├── auth.middleware.js        # Header authentication (x-user-id, devicetype)
+│   │   └── error.middleware.js       # Centralized 404 & error handlers
+│   ├── routes/
+│   │   ├── index.js                  # API router (/api/v1/...)
+│   │   └── room.routes.js            # Room endpoints
+│   ├── services/
+│   │   ├── room.service.js           # Room creation, joining, slot allocation
+│   │   ├── stroke.service.js         # Stroke storage, erasing, queries
+│   │   ├── chat.service.js           # Real-time room chat persistence
+│   │   └── reaper.service.js         # Periodic idle room cleanup
+│   └── sockets/
+│       ├── auth.socket.js            # Handshake authentication & device detection
+│       ├── events.js                 # Real-time live drawing event listeners
+│       ├── rateLimiter.js            # Token bucket rate limiter
+│       └── index.js                  # Socket.IO server initialization
+└── test/
+    └── test_multiplayer.js           # End-to-end integration test suite
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/unikworksystems/drawing-widget-ios-backend.git
-git branch -M main
-git push -uf origin main
+
+---
+
+## Getting Started
+
+### 1. Install Dependencies
+```bash
+npm install
 ```
 
-## Integrate with your tools
+### 2. Configure Environment
+Set database connection parameters in `.env`:
+```bash
+PORT=3000
+NODE_ENV=development
+DATABASE_URL=postgres://user:password@host:5432/dbname
+DATABASE_SSL=false
+ROOM_TTL_HOURS=24
+ROOM_REAP_INTERVAL_MINUTES=60
+```
 
-* [Set up project integrations](https://gitlab.com/unikworksystems/drawing-widget-ios-backend/-/settings/integrations)
+### 3. Run Database Migrations
+```bash
+npm run db:migrate
+```
 
-## Collaborate with your team
+### 4. Run the Server
+```bash
+# Development Mode (auto-reload on change)
+npm run dev
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+# Production Mode
+npm start
+```
 
-## Test and Deploy
+### 5. Run Automated Tests
+```bash
+npm test
+```
 
-Use the built-in continuous integration in GitLab.
+---
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+## API Documentation
 
-***
+### HTTP Headers
+Every authenticated request requires:
+- `x-user-id`: Client user identifier (string)
+- `devicetype`: `ios` or `android` (optional, defaults to `ios`)
 
-# Editing this README
+### Endpoints
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/health` | Health check (verifies database connectivity) |
+| `POST` | `/api/v1/rooms/` | Create a multiplayer room |
+| `POST` | `/api/v1/rooms/join` | Join an existing room via 6-character code |
+| `POST` | `/api/v1/rooms/leave` | Leave a room |
+| `GET` | `/api/v1/rooms/:id` | Get room metadata and active member list |
+| `GET` | `/api/v1/rooms/:id/strokes` | Get historical strokes for canvas backfill |
 
-## Suggestions for a good README
+---
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+## Socket.IO Events (`/v1` namespace)
 
-## Name
-Choose a self-explaining name for your project.
+### Client -> Server
+- `room:join`: `{ room_id }`
+- `room:leave`: `{}`
+- `stroke:move`: `{ id, step_index, kind, stroke_data }` *(Relayed live to other players with zero DB latency)*
+- `stroke:add`: `{ id, step_index, kind, stroke_data }` *(Broadcasted and saved to DB)*
+- `stroke:erase`: `{ stroke_ids: [...], step_index }`
+- `chat:add`: `{ message }`
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+### Server -> Client
+- `presence:join`: `{ user_id, name }`
+- `presence:leave`: `{ user_id }`
+- `stroke:move`: `{ id, step_index, kind, stroke_data, user_id }`
+- `stroke:add`: `{ id, room_id, user_id, step_index, kind, stroke_data, created_at }`
+- `stroke:backfill`: `{ strokes: [...] }`
+- `chat:backfill`: `{ chats: [...] }`

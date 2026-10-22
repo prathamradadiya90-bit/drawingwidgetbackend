@@ -1,0 +1,571 @@
+{
+  "info": {
+    "_postman_id": "c1f89345-d88e-4f01-9a99-9238384210ab",
+    "name": "Drawing Widget iOS Backend API",
+    "description": "Complete collection for Drawing Widget iOS Backend including Multiplayer Rooms, Stroke Backfills, Validation Cases, and WebSocket Live Drawing instructions.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "room_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "room_code",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "user_host",
+      "value": "user_host_101",
+      "type": "string"
+    },
+    {
+      "key": "user_guest",
+      "value": "user_guest_202",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Health & Status",
+      "item": [
+        {
+          "name": "Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Server status is ok and database is connected\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql(\"ok\");",
+                  "    pm.expect(json.database).to.eql(\"connected\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Check if server and PostgreSQL database are online and healthy."
+          }
+        },
+        {
+          "name": "API Base Info",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"API message confirms online status\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.message).to.include(\"Drawing Widget API is online\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api",
+              "host": ["{{base_url}}"],
+              "path": ["api"]
+            },
+            "description": "Check API base endpoints."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Multiplayer Rooms (Happy Path)",
+      "item": [
+        {
+          "name": "Step 1: Create Room (User 1 - Host)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test(\"Response has success true\", function () {",
+                  "    pm.expect(json.success).to.be.true;",
+                  "});",
+                  "pm.test(\"Room created with valid 6-char code and UUID\", function () {",
+                  "    pm.expect(json.data).to.have.property('room');",
+                  "    pm.expect(json.data.room.code).to.be.a('string');",
+                  "    pm.expect(json.data.room.code.length).to.eql(6);",
+                  "    pm.expect(json.data.room.id).to.be.a('string');",
+                  "    pm.expect(json.data).to.have.property('slot_index');",
+                  "});",
+                  "if (json.success && json.data && json.data.room) {",
+                  "    pm.collectionVariables.set('room_id', json.data.room.id);",
+                  "    pm.collectionVariables.set('room_code', json.data.room.code);",
+                  "    console.log('Room Code saved:', json.data.room.code);",
+                  "    console.log('Room ID saved:', json.data.room.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{user_host}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"svg_resource\": \"<svg>cat_outline_template</svg>\",\n  \"player_count\": 2,\n  \"name\": \"Alice (Host)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/rooms/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "rooms", ""]
+            },
+            "description": "Creates a new room. Automatically saves room_id and room_code into Postman collection variables."
+          }
+        },
+        {
+          "name": "Step 2: Join Room (User 2 - Guest)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Guest successfully joined\", function () {",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.room.code).to.eql(pm.collectionVariables.get('room_code'));",
+                  "    pm.expect(json.data).to.have.property('slot_index');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{user_guest}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{room_code}}\",\n  \"name\": \"Bob (Guest)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/rooms/join",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "rooms", "join"]
+            },
+            "description": "User 2 joins the room using the 6-character room code generated by User 1."
+          }
+        },
+        {
+          "name": "Step 3: Get Room Details & Active Members",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Room contains active members list\", function () {",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.members).to.be.an('array');",
+                  "    pm.expect(json.data.members.length).to.be.at.least(2);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-user-id",
+                "value": "{{user_host}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/rooms/{{room_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "rooms", "{{room_id}}"]
+            },
+            "description": "Fetches room status and the list of active members with their assigned drawing slot."
+          }
+        },
+        {
+          "name": "Step 4: Get Room Strokes (Canvas Backfill)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Strokes array is returned\", function () {",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.strokes).to.be.an('array');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-user-id",
+                "value": "{{user_guest}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/rooms/{{room_id}}/strokes",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "rooms", "{{room_id}}", "strokes"]
+            },
+            "description": "Fetches all saved strokes in chronological order to reconstruct the canvas."
+          }
+        },
+        {
+          "name": "Step 5: Leave Room (User 2)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Successfully left room\", function () {",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data).to.have.property('remaining_members');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{user_guest}}",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"room_id\": \"{{room_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/rooms/leave",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "rooms", "leave"]
+            },
+            "description": "Marks the user as departed from the room."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Validation & Error Handling",
+      "item": [
+        {
+          "name": "Error: Missing Auth Header (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 401 Unauthorized\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "pm.test(\"Returns error message about missing header\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.false;",
+                  "    pm.expect(json.error).to.include(\"Missing or invalid user id header\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"svg_resource\": \"<svg></svg>\",\n  \"player_count\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/rooms/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "rooms", ""]
+            },
+            "description": "Verifies that omitting 'x-user-id' returns HTTP 401 Unauthorized."
+          }
+        },
+        {
+          "name": "Error: Invalid devicetype Header (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 400 Bad Request\", function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "pm.test(\"Returns error message about devicetype\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.false;",
+                  "    pm.expect(json.error).to.include(\"Invalid devicetype\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "test_user_invalid_device",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "windows_phone",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"svg_resource\": \"<svg></svg>\",\n  \"player_count\": 2\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/rooms/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "rooms", ""]
+            },
+            "description": "Verifies that passing an unsupported devicetype returns HTTP 400 Bad Request."
+          }
+        },
+        {
+          "name": "Error: Join Non-Existent Room Code (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 404 Not Found\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test(\"Returns error for non-existent room\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.false;",
+                  "    pm.expect(json.error).to.include(\"No room found\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "test_user_random",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"ZZZZZZ\",\n  \"name\": \"Unknown Guest\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/rooms/join",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "rooms", "join"]
+            },
+            "description": "Verifies that joining with an invalid 6-character room code returns HTTP 404 Not Found."
+          }
+        },
+        {
+          "name": "Error: Invalid Player Count (422)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 422 Unprocessable Entity\", function () {",
+                  "    pm.response.to.have.status(422);",
+                  "});",
+                  "pm.test(\"Returns error for player count out of bounds\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.false;",
+                  "    pm.expect(json.error).to.include(\"player_count must be between 2 and 4\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{user_host}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"svg_resource\": \"<svg></svg>\",\n  \"player_count\": 10,\n  \"name\": \"Alice\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/rooms/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "rooms", ""]
+            },
+            "description": "Verifies that player_count > 4 returns HTTP 422 Unprocessable Entity."
+          }
+        }
+      ]
+    }
+  ]
+}
