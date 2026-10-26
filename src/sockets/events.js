@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { SocketEvents, SocketLimits, DeviceTypes } from '../helpers/constants.js';
+import { SocketEvents, SocketLimits, DeviceTypes, ErrorCodes } from '../helpers/constants.js';
 import { roomService } from '../services/room.service.js';
 import { strokeService } from '../services/stroke.service.js';
 import { chatService } from '../services/chat.service.js';
@@ -12,27 +12,177 @@ function isValidUuid(id) {
   return typeof id === 'string' && UUID_REGEX.test(id);
 }
 
-function isValidStrokeAdd(p) {
-  if (!p || typeof p !== 'object') return false;
-  return (
-    isValidUuid(p.id) &&
-    (p.kind === 'line' || p.kind === 'fill') &&
-    typeof p.step_index === 'number' &&
-    Number.isInteger(p.step_index) &&
-    typeof p.stroke_data === 'string' &&
-    p.stroke_data.length > 0 &&
-    p.stroke_data.length <= SocketLimits.MAX_STROKE_DATA_LEN
-  );
+// In-memory disconnect timers: key `${roomId}:${userId}` -> { graceTimer, killTimer }
+const disconnectTimers = new Map();
+
+// In-memory recent stroke cache per room for deduplication (Item 7)
+const roomRecentStrokes = new Map();
+const MAX_RECENT_STROKES_PER_ROOM = 2000;
+
+function markStrokeSeen(roomId, strokeId) {
+  if (!roomRecentStrokes.has(roomId)) {
+    roomRecentStrokes.set(roomId, new Set());
+  }
+  const set = roomRecentStrokes.get(roomId);
+  set.add(strokeId);
+  if (set.size > MAX_RECENT_STROKES_PER_ROOM) {
+    const oldest = set.values().next().value;
+    set.delete(oldest);
+  }
 }
 
-function isValidStrokeErase(p) {
-  if (!p || typeof p !== 'object') return false;
-  return (
-    Array.isArray(p.stroke_ids) &&
-    p.stroke_ids.every(isValidUuid) &&
-    typeof p.step_index === 'number' &&
-    Number.isInteger(p.step_index)
-  );
+function isStrokeSeen(roomId, strokeId) {
+  return roomRecentStrokes.get(roomId)?.has(strokeId) || false;
+}
+
+/**
+ * Send structured error back to socket client via ack callback and error events
+ */
+function sendSocketError(socket, eventName, code, message, ack, extra = {}) {
+  const errorPayload = {
+    ok: false,
+    error: message,
+    code,
+    event: eventName,
+    ...extra,
+  };
+
+  // Call client acknowledgement callback if provided
+  if (typeof ack === 'function') {
+    try {
+      ack(errorPayload);
+    } catch (_) {}
+  }
+
+  // Throttle error event emission to prevent client socket buffer overflow (max 1 error per 400ms)
+  const now = Date.now();
+  if (!socket.data._lastErrorTime || now - socket.data._lastErrorTime > 400) {
+    socket.data._lastErrorTime = now;
+    socket.emit(SocketEvents.ERROR, errorPayload);
+
+    // Emit specialized stroke:error event for drawing failures
+    if (
+      eventName === SocketEvents.STROKE_ADD ||
+      eventName === SocketEvents.STROKE_MOVE ||
+      eventName === SocketEvents.STROKE_ERASE
+    ) {
+      socket.emit(SocketEvents.STROKE_ERROR, errorPayload);
+    }
+  }
+}
+
+const VALID_KINDS = ['line', 'fill', 'shape', 'emoji'];
+
+/**
+ * Detailed validation for iOS PKDrawing stroke add / move, shape, and emoji
+ */
+function validateStrokeAdd(p) {
+  if (!p || typeof p !== 'object') {
+    return { valid: false, code: ErrorCodes.INVALID_STROKE_ID, message: 'Payload must be a JSON object' };
+  }
+  if (!isValidUuid(p.id)) {
+    return { valid: false, code: ErrorCodes.INVALID_STROKE_ID, message: 'Stroke id must be a valid UUID' };
+  }
+  if (!VALID_KINDS.includes(p.kind)) {
+    return { valid: false, code: ErrorCodes.INVALID_STROKE_KIND, message: 'Stroke kind must be "line", "fill", "shape", or "emoji"' };
+  }
+
+  const hasStringData = typeof p.stroke_data === 'string' && p.stroke_data.length > 0;
+  const hasObjectData = typeof p.stroke_data === 'object' && p.stroke_data !== null;
+  const hasShapeOrEmojiFields =
+    p.kind === 'shape' ||
+    p.kind === 'emoji' ||
+    p.coordinates !== undefined ||
+    p.emoji_id !== undefined ||
+    p.shape_type !== undefined;
+
+  if (!hasStringData && !hasObjectData && !hasShapeOrEmojiFields) {
+    return { valid: false, code: ErrorCodes.INVALID_STROKE_DATA, message: 'Drawing data must be provided as a non-empty string or object' };
+  }
+
+  if (hasStringData && p.stroke_data.length > SocketLimits.MAX_STROKE_DATA_LEN) {
+    return { valid: false, code: ErrorCodes.PAYLOAD_TOO_LARGE, message: 'Drawing payload exceeds maximum allowed length (100MB)' };
+  }
+
+  if (
+    p.step_index !== undefined &&
+    p.step_index !== null &&
+    (!Number.isInteger(p.step_index) || typeof p.step_index !== 'number')
+  ) {
+    return { valid: false, code: ErrorCodes.INVALID_STEP_INDEX, message: 'step_index must be an integer if provided' };
+  }
+  return { valid: true };
+}
+
+/**
+ * Normalize shape and emoji fields from either top-level payload or inside stroke_data
+ */
+function normalizeStrokePayload(p) {
+  let strokeData = p.stroke_data;
+  const extraFields = {};
+
+  if (p.kind === 'shape' || p.kind === 'emoji') {
+    const rawObj = typeof p.stroke_data === 'object' && p.stroke_data !== null ? p.stroke_data : {};
+
+    const shapeType = p.shape_type || rawObj.shape_type || null;
+    const strokeId = p.stroke_id || rawObj.stroke_id || null;
+    const fillId = p.fill_id || rawObj.fill_id || null;
+    const strokeWidth = p.stroke_width !== undefined ? p.stroke_width : (rawObj.stroke_width !== undefined ? rawObj.stroke_width : null);
+    const emojiId = p.emoji_id || rawObj.emoji_id || null;
+    const coordinates = p.coordinates || rawObj.coordinates || null;
+    const size = p.size || rawObj.size || null;
+    const angle = p.angle !== undefined ? p.angle : (rawObj.angle !== undefined ? rawObj.angle : (p.rotation !== undefined ? p.rotation : (rawObj.rotation !== undefined ? rawObj.rotation : 0)));
+
+    if (p.kind === 'shape') {
+      extraFields.shape_type = shapeType;
+      extraFields.stroke_id = strokeId;
+      extraFields.fill_id = fillId;
+      extraFields.stroke_width = strokeWidth;
+      extraFields.coordinates = coordinates;
+      extraFields.size = size;
+      extraFields.angle = angle;
+    } else if (p.kind === 'emoji') {
+      extraFields.emoji_id = emojiId;
+      extraFields.coordinates = coordinates;
+      extraFields.size = size;
+      extraFields.angle = angle;
+    }
+
+    if (typeof strokeData !== 'string') {
+      strokeData = {
+        ...rawObj,
+        ...extraFields,
+      };
+    }
+  }
+
+  return {
+    strokeData: strokeData ?? '',
+    extraFields,
+  };
+}
+
+/**
+ * Detailed validation for iOS stroke erase
+ */
+function validateStrokeErase(p) {
+  if (!p || typeof p !== 'object') {
+    return { valid: false, code: ErrorCodes.INVALID_STROKE_ID, message: 'Payload must be a JSON object' };
+  }
+  if (!Array.isArray(p.stroke_ids) || p.stroke_ids.length === 0) {
+    return { valid: false, code: ErrorCodes.INVALID_STROKE_ID, message: 'stroke_ids must be a non-empty array of UUIDs' };
+  }
+  if (!p.stroke_ids.every(isValidUuid)) {
+    return { valid: false, code: ErrorCodes.INVALID_STROKE_ID, message: 'All items in stroke_ids must be valid UUIDs' };
+  }
+  if (
+    p.step_index !== undefined &&
+    p.step_index !== null &&
+    (!Number.isInteger(p.step_index) || typeof p.step_index !== 'number')
+  ) {
+    return { valid: false, code: ErrorCodes.INVALID_STEP_INDEX, message: 'step_index must be an integer if provided' };
+  }
+  return { valid: true };
 }
 
 function isValidAndroidStrokeAdd(p) {
@@ -69,21 +219,50 @@ export function registerSocketEvents(socket, io) {
   socket.on(SocketEvents.ROOM_JOIN, async (payload, ack) => {
     const roomId = payload?.room_id;
     if (!isValidUuid(roomId)) {
-      if (typeof ack === 'function') ack({ ok: false, error: 'Valid room_id is required' });
+      sendSocketError(socket, SocketEvents.ROOM_JOIN, ErrorCodes.INVALID_ROOM_ID, 'Valid room_id UUID is required', ack);
       return;
     }
 
     try {
+      // Item 5: Ensure user actually joined through REST before letting them into room events
       const member = await roomService.getRoomMemberRaw(roomId, userId);
       if (!member) {
-        if (typeof ack === 'function') ack({ ok: false, error: 'You are not a member of this room' });
+        sendSocketError(
+          socket,
+          SocketEvents.ROOM_JOIN,
+          ErrorCodes.NOT_A_MEMBER,
+          'You are not an active member of this room. Please join via room code first.',
+          ack
+        );
         return;
       }
 
       const { room } = await roomService.getRoom(roomId);
-      if (room.device_type !== deviceType) {
-        if (typeof ack === 'function') ack({ ok: false, error: 'Cannot join room from a different platform' });
+      if (!room) {
+        sendSocketError(socket, SocketEvents.ROOM_JOIN, ErrorCodes.ROOM_NOT_FOUND, 'Room not found or has expired', ack);
         return;
+      }
+
+      if (room.device_type !== deviceType) {
+        sendSocketError(
+          socket,
+          SocketEvents.ROOM_JOIN,
+          ErrorCodes.PLATFORM_MISMATCH,
+          `Cannot join room created for a different platform (${room.device_type})`,
+          ack
+        );
+        return;
+      }
+
+      // Item 9: If user had a pending disconnect timer, cancel it (user reconnected cleanly)
+      const disconnectKey = `${roomId}:${userId}`;
+      const pendingDisconnect = disconnectTimers.get(disconnectKey);
+      let wasTemporarilyDisconnected = false;
+      if (pendingDisconnect) {
+        clearTimeout(pendingDisconnect.graceTimer);
+        clearTimeout(pendingDisconnect.killTimer);
+        disconnectTimers.delete(disconnectKey);
+        wasTemporarilyDisconnected = true;
       }
 
       // If already in another room, leave previous room cleanly
@@ -99,11 +278,20 @@ export function registerSocketEvents(socket, io) {
       socket.to(roomId).emit(SocketEvents.PRESENCE_JOIN, {
         user_id: userId,
         name: member.name,
+        slot_index: member.slot_index,
       });
 
-      if (typeof ack === 'function') ack({ ok: true });
+      if (typeof ack === 'function') {
+        ack({
+          ok: true,
+          room_id: roomId,
+          slot_index: member.slot_index,
+          name: member.name,
+          reconnected: wasTemporarilyDisconnected,
+        });
+      }
 
-      // Backfill existing strokes & chat to new participant
+      // Backfill existing strokes & chat
       try {
         if (deviceType === DeviceTypes.ANDROID) {
           const strokes = await strokeService.listAndroidStrokes(roomId);
@@ -120,49 +308,129 @@ export function registerSocketEvents(socket, io) {
       }
     } catch (err) {
       logger.error(`Error in room:join handler:`, err);
-      if (typeof ack === 'function') ack({ ok: false, error: err.message || 'Room not found' });
+      sendSocketError(socket, SocketEvents.ROOM_JOIN, ErrorCodes.ROOM_NOT_FOUND, err.message || 'Room not found', ack);
     }
   });
 
   // --- ROOM LEAVE ---
-  socket.on(SocketEvents.ROOM_LEAVE, async () => {
+  socket.on(SocketEvents.ROOM_LEAVE, async (payload, ack) => {
     const roomId = socket.data.roomId;
-    if (!roomId) return;
+    if (!roomId) {
+      if (typeof ack === 'function') ack({ ok: true, message: 'Not currently in a room' });
+      return;
+    }
 
-    socket.to(roomId).emit(SocketEvents.PRESENCE_LEAVE, { user_id: userId });
-    await socket.leave(roomId);
-    socket.data.roomId = undefined;
+    // Cancel any pending disconnect timers
+    const disconnectKey = `${roomId}:${userId}`;
+    const pending = disconnectTimers.get(disconnectKey);
+    if (pending) {
+      clearTimeout(pending.graceTimer);
+      clearTimeout(pending.killTimer);
+      disconnectTimers.delete(disconnectKey);
+    }
+
+    try {
+      // Item 10 & 11: Free player slot and handle host departure
+      const leaveResult = await roomService.leaveRoom({ roomId, userId });
+
+      if (leaveResult.room_closed) {
+        // Item 11: Host left -> broadcast room closed to all peers
+        socket.to(roomId).emit(SocketEvents.ROOM_CLOSED, {
+          reason: 'HOST_LEFT',
+          message: 'The host has left the room. Room session ended.',
+        });
+      } else {
+        // Non-host left -> announce presence leave immediately
+        socket.to(roomId).emit(SocketEvents.PRESENCE_LEAVE, { user_id: userId });
+      }
+
+      await socket.leave(roomId);
+      socket.data.roomId = undefined;
+
+      if (typeof ack === 'function') ack({ ok: true, ...leaveResult });
+    } catch (err) {
+      logger.error(`Error in room:leave handler:`, err);
+      if (typeof ack === 'function') ack({ ok: false, error: err.message });
+    }
   });
 
   // --- LIVE DRAWING STREAM (Zero-latency relay) ---
-  socket.on(SocketEvents.STROKE_MOVE, (payload) => {
+  socket.on(SocketEvents.STROKE_MOVE, (payload, ack) => {
     const roomId = socket.data.roomId;
-    if (!roomId || !isValidStrokeAdd(payload)) return;
+    if (!roomId) {
+      sendSocketError(socket, SocketEvents.STROKE_MOVE, ErrorCodes.NOT_IN_ROOM, 'Socket is not in an active room. Call room:join first.', ack);
+      return;
+    }
 
-    // Direct relay with user_id attached — no DB latency for smooth drawing
+    const validation = validateStrokeAdd(payload);
+    if (!validation.valid) {
+      sendSocketError(socket, SocketEvents.STROKE_MOVE, validation.code, validation.message, ack, { stroke_id: payload?.id });
+      return;
+    }
+
+    // Item 8: Rate limit behavior
+    if (!takeToken(socket.data.rate)) {
+      sendSocketError(socket, SocketEvents.STROKE_MOVE, ErrorCodes.RATE_LIMIT_EXCEEDED, 'Stroke rate limit exceeded. Please slow down.', ack, { stroke_id: payload.id });
+      return;
+    }
+
+    // Direct relay with user_id attached — 0ms DB delay for smooth continuous drawing
+    const { strokeData: moveStrokeData, extraFields: moveExtraFields } = normalizeStrokePayload(payload);
     socket.to(roomId).emit(SocketEvents.STROKE_MOVE, {
       ...payload,
+      ...moveExtraFields,
+      stroke_data: moveStrokeData,
+      step_index: payload.step_index !== undefined ? payload.step_index : null,
       user_id: userId,
     });
+
+    if (typeof ack === 'function') ack({ ok: true, id: payload.id });
   });
 
   // --- FINALIZED STROKE ADD ---
-  socket.on(SocketEvents.STROKE_ADD, (payload) => {
+  socket.on(SocketEvents.STROKE_ADD, async (payload, ack) => {
     const roomId = socket.data.roomId;
-    if (!roomId || !isValidStrokeAdd(payload)) return;
-    if (!takeToken(socket.data.rate)) return;
+    if (!roomId) {
+      sendSocketError(socket, SocketEvents.STROKE_ADD, ErrorCodes.NOT_IN_ROOM, 'Socket is not in an active room. Call room:join first.', ack);
+      return;
+    }
 
+    // Item 2: Send error back for bad stroke events
+    const validation = validateStrokeAdd(payload);
+    if (!validation.valid) {
+      sendSocketError(socket, SocketEvents.STROKE_ADD, validation.code, validation.message, ack, { stroke_id: payload?.id });
+      return;
+    }
+
+    // Item 8: Rate limit behavior
+    if (!takeToken(socket.data.rate)) {
+      sendSocketError(socket, SocketEvents.STROKE_ADD, ErrorCodes.RATE_LIMIT_EXCEEDED, 'Stroke rate limit exceeded. Please slow down.', ack, { stroke_id: payload.id });
+      return;
+    }
+
+    // Item 7: Accept the same stroke twice safely (idempotent resend upon reconnect)
+    if (isStrokeSeen(roomId, payload.id)) {
+      if (typeof ack === 'function') {
+        ack({ ok: true, id: payload.id, saved: true, duplicate: true });
+      }
+      socket.emit(SocketEvents.STROKE_SAVED, { id: payload.id, ok: true, duplicate: true });
+      return;
+    }
+
+    markStrokeSeen(roomId, payload.id);
+
+    const { strokeData, extraFields } = normalizeStrokePayload(payload);
     const stroke = {
       id: payload.id,
       roomId,
       userId,
-      stepIndex: payload.step_index,
+      stepIndex: payload.step_index !== undefined ? payload.step_index : null,
       kind: payload.kind,
-      strokeData: payload.stroke_data,
+      strokeData,
       createdAt: new Date().toISOString(),
     };
 
-    // Broadcast immediately to peers
+    // Broadcast immediately to peers for 0-latency live rendering
     socket.to(roomId).emit(SocketEvents.STROKE_ADD, {
       id: stroke.id,
       room_id: roomId,
@@ -170,51 +438,122 @@ export function registerSocketEvents(socket, io) {
       step_index: stroke.stepIndex,
       kind: stroke.kind,
       stroke_data: stroke.strokeData,
+      ...extraFields,
       created_at: stroke.createdAt,
     });
 
-    // Asynchronously persist to database
-    strokeService.saveStroke(stroke).catch((err) => {
+    // Item 6: Persist stroke and confirm saved to sender
+    try {
+      await strokeService.saveStroke(stroke);
+      if (typeof ack === 'function') {
+        ack({ ok: true, id: stroke.id, saved: true });
+      }
+      socket.emit(SocketEvents.STROKE_SAVED, { id: stroke.id, ok: true });
+    } catch (err) {
       logger.error(`Failed to persist stroke ${stroke.id}:`, err);
-    });
+      // Remove from seen cache so the client can retry saving
+      roomRecentStrokes.get(roomId)?.delete(stroke.id);
+      sendSocketError(socket, SocketEvents.STROKE_ADD, ErrorCodes.SAVE_FAILED, 'Failed to persist stroke to database', ack, { id: stroke.id });
+    }
   });
 
   // --- STROKE ERASE ---
-  socket.on(SocketEvents.STROKE_ERASE, (payload) => {
+  socket.on(SocketEvents.STROKE_ERASE, async (payload, ack) => {
     const roomId = socket.data.roomId;
-    if (!roomId || !isValidStrokeErase(payload)) return;
-    if (!takeToken(socket.data.rate)) return;
+    if (!roomId) {
+      sendSocketError(socket, SocketEvents.STROKE_ERASE, ErrorCodes.NOT_IN_ROOM, 'Socket is not in an active room. Call room:join first.', ack);
+      return;
+    }
 
-    socket.to(roomId).emit(SocketEvents.STROKE_ERASE, {
-      room_id: roomId,
-      user_id: userId,
-      stroke_ids: payload.stroke_ids,
-      step_index: payload.step_index,
-    });
+    const validation = validateStrokeErase(payload);
+    if (!validation.valid) {
+      sendSocketError(socket, SocketEvents.STROKE_ERASE, validation.code, validation.message, ack);
+      return;
+    }
 
-    strokeService.eraseStrokes(roomId, userId, payload.stroke_ids).catch((err) => {
+    if (!takeToken(socket.data.rate)) {
+      sendSocketError(socket, SocketEvents.STROKE_ERASE, ErrorCodes.RATE_LIMIT_EXCEEDED, 'Rate limit exceeded. Please slow down.', ack);
+      return;
+    }
+
+    try {
+      // Item 1: Only the owner can erase their stroke
+      const erasedIds = await strokeService.eraseStrokes(roomId, userId, payload.stroke_ids);
+
+      if (erasedIds.length === 0) {
+        sendSocketError(
+          socket,
+          SocketEvents.STROKE_ERASE,
+          ErrorCodes.UNAUTHORIZED_ERASE,
+          'Cannot erase strokes: none of the specified stroke IDs belong to you or they do not exist',
+          ack,
+          { stroke_ids: payload.stroke_ids }
+        );
+        return;
+      }
+
+      // Broadcast ONLY the erased IDs that were legitimately owned and deleted by this user
+      socket.to(roomId).emit(SocketEvents.STROKE_ERASE, {
+        room_id: roomId,
+        user_id: userId,
+        stroke_ids: erasedIds,
+        step_index: payload.step_index !== undefined ? payload.step_index : null,
+      });
+
+      if (typeof ack === 'function') {
+        ack({ ok: true, erased_ids: erasedIds });
+      }
+    } catch (err) {
       logger.error(`Failed to erase strokes in ${roomId}:`, err);
-    });
+      sendSocketError(socket, SocketEvents.STROKE_ERASE, ErrorCodes.SAVE_FAILED, 'Database error while erasing strokes', ack);
+    }
   });
 
   // --- ANDROID LIVE DRAWING RELAY ---
-  socket.on(SocketEvents.ANDROID_STROKE_MOVE, (payload) => {
+  socket.on(SocketEvents.ANDROID_STROKE_MOVE, (payload, ack) => {
     const roomId = socket.data.roomId;
-    if (!roomId) return;
+    if (!roomId) {
+      sendSocketError(socket, SocketEvents.ANDROID_STROKE_MOVE, ErrorCodes.NOT_IN_ROOM, 'Socket is not in an active room', ack);
+      return;
+    }
 
     socket.to(roomId).emit(SocketEvents.ANDROID_STROKE_MOVE, {
       ...payload,
       user_id: userId,
     });
+
+    if (typeof ack === 'function') ack({ ok: true });
   });
 
   // --- ANDROID STROKE ADD ---
-  socket.on(SocketEvents.ANDROID_STROKE_ADD, (payload) => {
+  socket.on(SocketEvents.ANDROID_STROKE_ADD, async (payload, ack) => {
     const roomId = socket.data.roomId;
-    if (!roomId || !isValidAndroidStrokeAdd(payload)) return;
-    if (!takeToken(socket.data.rate)) return;
+    if (!roomId) {
+      sendSocketError(socket, SocketEvents.ANDROID_STROKE_ADD, ErrorCodes.NOT_IN_ROOM, 'Socket is not in an active room', ack);
+      return;
+    }
+
+    if (!isValidAndroidStrokeAdd(payload)) {
+      sendSocketError(socket, SocketEvents.ANDROID_STROKE_ADD, ErrorCodes.INVALID_STROKE_DATA, 'Invalid Android stroke payload', ack);
+      return;
+    }
+
+    if (!takeToken(socket.data.rate)) {
+      sendSocketError(socket, SocketEvents.ANDROID_STROKE_ADD, ErrorCodes.RATE_LIMIT_EXCEEDED, 'Rate limit exceeded. Please slow down.', ack);
+      return;
+    }
 
     const strokeId = payload.id || crypto.randomUUID();
+
+    // Deduplication check
+    if (isStrokeSeen(roomId, strokeId)) {
+      if (typeof ack === 'function') ack({ ok: true, id: strokeId, saved: true, duplicate: true });
+      socket.emit(SocketEvents.ANDROID_STROKE_SAVED, { id: strokeId, ok: true, duplicate: true });
+      return;
+    }
+
+    markStrokeSeen(roomId, strokeId);
+
     const stroke = {
       id: strokeId,
       roomId,
@@ -233,16 +572,34 @@ export function registerSocketEvents(socket, io) {
       created_at: stroke.createdAt,
     });
 
-    strokeService.saveAndroidStroke(stroke).catch((err) => {
+    try {
+      await strokeService.saveAndroidStroke(stroke);
+      if (typeof ack === 'function') ack({ ok: true, id: stroke.id, saved: true });
+      socket.emit(SocketEvents.ANDROID_STROKE_SAVED, { id: stroke.id, ok: true });
+    } catch (err) {
       logger.error(`Failed to persist Android stroke for room ${roomId}:`, err);
-    });
+      roomRecentStrokes.get(roomId)?.delete(stroke.id);
+      sendSocketError(socket, SocketEvents.ANDROID_STROKE_ADD, ErrorCodes.SAVE_FAILED, 'Failed to persist Android stroke', ack, { id: stroke.id });
+    }
   });
 
   // --- LIVE CHAT ---
-  socket.on(SocketEvents.CHAT_ADD, async (payload) => {
+  socket.on(SocketEvents.CHAT_ADD, async (payload, ack) => {
     const roomId = socket.data.roomId;
-    if (!roomId || !isValidChatAdd(payload)) return;
-    if (!takeToken(socket.data.rate)) return;
+    if (!roomId) {
+      sendSocketError(socket, SocketEvents.CHAT_ADD, ErrorCodes.NOT_IN_ROOM, 'Socket is not in an active room', ack);
+      return;
+    }
+
+    if (!isValidChatAdd(payload)) {
+      sendSocketError(socket, SocketEvents.CHAT_ADD, ErrorCodes.INVALID_STROKE_DATA, 'Message must be between 1 and 10,000 characters', ack);
+      return;
+    }
+
+    if (!takeToken(socket.data.rate)) {
+      sendSocketError(socket, SocketEvents.CHAT_ADD, ErrorCodes.RATE_LIMIT_EXCEEDED, 'Chat rate limit exceeded. Please slow down.', ack);
+      return;
+    }
 
     const chatId = payload.id || crypto.randomUUID();
     const member = await roomService.getRoomMemberRaw(roomId, userId);
@@ -264,16 +621,63 @@ export function registerSocketEvents(socket, io) {
       created_at: chat.createdAt,
     });
 
-    chatService.saveChat(chat).catch((err) => {
+    try {
+      await chatService.saveChat(chat);
+      if (typeof ack === 'function') ack({ ok: true, id: chat.id });
+    } catch (err) {
       logger.error(`Failed to persist chat message ${chat.id}:`, err);
-    });
+      sendSocketError(socket, SocketEvents.CHAT_ADD, ErrorCodes.SAVE_FAILED, 'Failed to persist chat message', ack, { id: chat.id });
+    }
   });
 
   // --- DISCONNECT ---
-  socket.on('disconnect', (reason) => {
-    if (socket.data.roomId) {
-      socket.to(socket.data.roomId).emit(SocketEvents.PRESENCE_LEAVE, { user_id: userId });
+  socket.on('disconnect', async (reason) => {
+    const roomId = socket.data.roomId;
+    logger.info(`Socket disconnected: ${socket.id} (user: ${userId.slice(0, 8)}, reason: ${reason})`);
+    if (!roomId) return;
+
+    // Check if user still has other open sockets in the same room (e.g. multiple tabs / rapid reconnect)
+    try {
+      const roomSockets = await socket.nsp.in(roomId).fetchSockets();
+      const hasOtherSocket = roomSockets.some((s) => s.id !== socket.id && s.data.userId === userId);
+      if (hasOtherSocket) {
+        return;
+      }
+    } catch (err) {
+      logger.error('Error checking room sockets on disconnect:', err);
     }
-    logger.info(`Socket disconnected: ${socket.id} (${reason})`);
+
+    const disconnectKey = `${roomId}:${userId}`;
+
+    // Item 9: Short 5-second grace period before announcing presence:leave to avoid UI flickering on brief network drops
+    const graceTimer = setTimeout(async () => {
+      try {
+        socket.to(roomId).emit(SocketEvents.PRESENCE_LEAVE, { user_id: userId });
+        logger.info(`Grace period elapsed: broadcasted presence:leave for user ${userId.slice(0, 8)} in room ${roomId}`);
+      } catch (err) {
+        logger.error('Error emitting presence:leave after grace period:', err);
+      }
+    }, SocketLimits.DISCONNECT_GRACE_MS);
+
+    // Item 10: 60-second app kill timeout to free player slot in database if leave call never arrives
+    const killTimer = setTimeout(async () => {
+      disconnectTimers.delete(disconnectKey);
+      try {
+        const leaveResult = await roomService.leaveRoom({ roomId, userId });
+        logger.info(`App-kill timeout reached: freed slot for user ${userId.slice(0, 8)} in room ${roomId}`);
+
+        // Item 11: If host disconnected and never returned, close the room session
+        if (leaveResult.room_closed) {
+          socket.to(roomId).emit(SocketEvents.ROOM_CLOSED, {
+            reason: 'HOST_DISCONNECTED',
+            message: 'The host has disconnected. Room session ended.',
+          });
+        }
+      } catch (err) {
+        // Ignored if user already left or room deleted
+      }
+    }, SocketLimits.APP_KILL_TIMEOUT_MS);
+
+    disconnectTimers.set(disconnectKey, { graceTimer, killTimer });
   });
 }

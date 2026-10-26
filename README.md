@@ -118,10 +118,11 @@ Every authenticated request requires:
 
 | Method | Endpoint | Description |
 |---|---|---|
+| `GET` | `/ping` | Lightweight cold-start wakeup (instant 200, no DB query) |
 | `GET` | `/health` | Health check (verifies database connectivity) |
-| `POST` | `/api/v1/rooms/` | Create a multiplayer room |
+| `POST` | `/api/v1/rooms/` | Create a multiplayer room (`svg_resource` optional) |
 | `POST` | `/api/v1/rooms/join` | Join an existing room via 6-character code |
-| `POST` | `/api/v1/rooms/leave` | Leave a room |
+| `POST` | `/api/v1/rooms/leave` | Leave a room (host departure closes room for all) |
 | `GET` | `/api/v1/rooms/:id` | Get room metadata and active member list |
 | `GET` | `/api/v1/rooms/:id/strokes` | Get historical strokes for canvas backfill |
 
@@ -129,18 +130,43 @@ Every authenticated request requires:
 
 ## Socket.IO Events (`/v1` namespace)
 
-### Client -> Server
+### Client -> Server (All actions accept an optional ack callback `(response) => {}`)
 - `room:join`: `{ room_id }`
 - `room:leave`: `{}`
-- `stroke:move`: `{ id, step_index, kind, stroke_data }` *(Relayed live to other players with zero DB latency)*
-- `stroke:add`: `{ id, step_index, kind, stroke_data }` *(Broadcasted and saved to DB)*
-- `stroke:erase`: `{ stroke_ids: [...], step_index }`
+- `stroke:move`: `{ id, kind, stroke_data, step_index? }` *(Relayed live with zero DB latency)*
+- `stroke:add`: `{ id, kind, stroke_data, step_index? }` *(Broadcasted live & asynchronously saved to DB)*
+  - **Line / Fill**: `kind: "line" | "fill"`, `stroke_data: "<base64>"`
+  - **Shape**: `kind: "shape"`, fields: `shape_type`, `stroke_id`, `fill_id`, `stroke_width`, `coordinates: { x, y }`, `size: { width, height }`, `angle`
+  - **Emoji**: `kind: "emoji"`, fields: `emoji_id`, `coordinates: { x, y }`, `size: { width, height }`, `angle`
+- `stroke:erase`: `{ stroke_ids: [...], step_index? }` *(Only the creator of a stroke can erase it)*
 - `chat:add`: `{ message }`
 
 ### Server -> Client
-- `presence:join`: `{ user_id, name }`
-- `presence:leave`: `{ user_id }`
-- `stroke:move`: `{ id, step_index, kind, stroke_data, user_id }`
-- `stroke:add`: `{ id, room_id, user_id, step_index, kind, stroke_data, created_at }`
+- `presence:join`: `{ user_id, name, slot_index }`
+- `presence:leave`: `{ user_id }` *(Sent after 5s disconnect grace period)*
+- `stroke:move`: `{ id, kind, stroke_data, user_id, step_index? }`
+- `stroke:add`: `{ id, room_id, user_id, kind, stroke_data, created_at, step_index? }`
+- `stroke:saved`: `{ id, ok: true, duplicate?: boolean }` *(Sent upon successful DB save)*
+- `stroke:error`: `{ id?, code, error, event }` *(Sent when stroke validation or persistence fails)*
+- `room:closed`: `{ reason: "HOST_LEFT" | "HOST_DISCONNECTED", message: "..." }`
 - `stroke:backfill`: `{ strokes: [...] }`
 - `chat:backfill`: `{ chats: [...] }`
+- `error`: `{ code, error, event }` *(Standard error event for UI handling)*
+
+### Standard Error Codes for UI Handling
+
+| Code | Description | Recommended UI Action |
+|---|---|---|
+| `NOT_IN_ROOM` | Socket not currently joined to a room channel | Call `room:join` before drawing |
+| `NOT_A_MEMBER` | User did not join room via REST API | Prompt user to enter room code again |
+| `ROOM_NOT_FOUND` | Room does not exist or has expired | Navigate back to lobby |
+| `ROOM_CLOSED` | Host left or disconnected | Display "Host left the session" dialog |
+| `ROOM_FULL` | Room has reached maximum player capacity (2-4) | Display "Room is full" message |
+| `PLATFORM_MISMATCH` | Joining iOS room from Android or vice versa | Display platform mismatch message |
+| `UNAUTHORIZED_ERASE` | Attempted to erase strokes owned by another user | Ignore or revert local canvas erase |
+| `INVALID_STROKE_ID` | Missing or invalid UUID | Ensure UUIDv4 is used for stroke IDs |
+| `INVALID_STROKE_DATA` | Empty or malformed stroke data | Validate drawing points before emit |
+| `PAYLOAD_TOO_LARGE` | Stroke payload exceeds maximum limit (100MB) | Simplify or compress stroke data |
+| `RATE_LIMIT_EXCEEDED` | Exceeded 50 strokes/sec (burst 200) | Throttle pen move emissions |
+| `SAVE_FAILED` | Database write error on stroke | Retry sending stroke after delay |
+

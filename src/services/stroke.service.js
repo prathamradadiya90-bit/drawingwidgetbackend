@@ -4,28 +4,31 @@ export const strokeService = {
   /**
    * Save an iOS stroke (PKDrawing base64 representation)
    */
-  async saveStroke({ id, roomId, userId, stepIndex, kind = 'line', strokeData, createdAt = new Date().toISOString() }) {
+  async saveStroke({ id, roomId, userId, stepIndex = null, kind = 'line', strokeData, createdAt = new Date().toISOString() }) {
+    const rawData = typeof strokeData === 'object' ? JSON.stringify(strokeData) : String(strokeData ?? '');
     const { rowCount } = await pool.query(
       `INSERT INTO room_strokes
          (id, room_id, user_id, step_index, kind, stroke_data, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (id) DO NOTHING`,
-      [id, roomId, userId, stepIndex, kind, strokeData, createdAt]
+      [id, roomId, userId, stepIndex ?? null, kind, rawData, createdAt]
     );
     return (rowCount || 0) > 0;
   },
 
   /**
-   * Erase specific strokes from a room
+   * Erase specific strokes from a room (only if owned by userId)
+   * Returns array of deleted stroke IDs
    */
   async eraseStrokes(roomId, userId, strokeIds) {
-    if (!Array.isArray(strokeIds) || strokeIds.length === 0) return 0;
-    const { rowCount } = await pool.query(
+    if (!Array.isArray(strokeIds) || strokeIds.length === 0) return [];
+    const { rows } = await pool.query(
       `DELETE FROM room_strokes
-       WHERE room_id = $1 AND user_id = $2 AND id = ANY($3::uuid[])`,
+       WHERE room_id = $1 AND user_id = $2 AND id = ANY($3::uuid[])
+       RETURNING id`,
       [roomId, userId, strokeIds]
     );
-    return rowCount || 0;
+    return rows.map((r) => r.id);
   },
 
   /**
@@ -39,7 +42,18 @@ export const strokeService = {
        ORDER BY created_at ASC`,
       [roomId]
     );
-    return rows;
+    return rows.map((r) => {
+      let parsed = r.stroke_data;
+      if (typeof parsed === 'string' && (parsed.startsWith('{') || parsed.startsWith('['))) {
+        try {
+          parsed = JSON.parse(parsed);
+        } catch (_) {}
+      }
+      return {
+        ...r,
+        stroke_data: parsed,
+      };
+    });
   },
 
   /**

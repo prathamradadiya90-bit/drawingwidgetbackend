@@ -5,7 +5,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE TABLE IF NOT EXISTS rooms (
     id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     code          TEXT NOT NULL UNIQUE,
-    svg_resource  TEXT NOT NULL,
+    svg_resource  TEXT,
     host_id       TEXT NOT NULL,
     player_count  INT NOT NULL DEFAULT 2 CHECK (player_count BETWEEN 2 AND 4),
     device_type   TEXT NOT NULL DEFAULT 'ios' CHECK (device_type IN ('ios', 'android')),
@@ -29,13 +29,13 @@ CREATE TABLE IF NOT EXISTS room_members (
 CREATE UNIQUE INDEX IF NOT EXISTS room_members_room_id_slot_index_uidx
     ON room_members (room_id, slot_index) WHERE slot_index IS NOT NULL;
 
--- iOS Room Strokes table (base64 PKDrawing)
+-- iOS Room Strokes table (base64 PKDrawing or JSON shape/emoji)
 CREATE TABLE IF NOT EXISTS room_strokes (
     id           UUID PRIMARY KEY,
     room_id      UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
     user_id      TEXT NOT NULL,
-    step_index   INT NOT NULL,
-    kind         TEXT NOT NULL DEFAULT 'line' CHECK (kind IN ('line', 'fill')),
+    step_index   INT,
+    kind         TEXT NOT NULL DEFAULT 'line' CHECK (kind IN ('line', 'fill', 'shape', 'emoji')),
     stroke_data  TEXT NOT NULL,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -67,3 +67,9 @@ CREATE TABLE IF NOT EXISTS room_chats (
 
 CREATE INDEX IF NOT EXISTS idx_room_chats_room_id_created_at
     ON room_chats (room_id, created_at);
+
+-- Migrations for existing databases
+ALTER TABLE rooms ALTER COLUMN svg_resource DROP NOT NULL;
+ALTER TABLE room_strokes ALTER COLUMN step_index DROP NOT NULL;
+ALTER TABLE room_strokes DROP CONSTRAINT IF EXISTS room_strokes_kind_check;
+ALTER TABLE room_strokes ADD CONSTRAINT room_strokes_kind_check CHECK (kind IN ('line', 'fill', 'shape', 'emoji'));

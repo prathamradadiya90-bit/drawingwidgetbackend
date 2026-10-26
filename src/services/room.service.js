@@ -36,9 +36,9 @@ export const roomService = {
   /**
    * Create a new multiplayer drawing room
    */
-  async createRoom({ svgResource, playerCount = 2, name, hostId, deviceType = DeviceTypes.IOS }) {
-    if (!svgResource || typeof svgResource !== 'string') {
-      throw new ServiceError('svg_resource is required', 422);
+  async createRoom({ svgResource = null, playerCount = 2, name, hostId, deviceType = DeviceTypes.IOS }) {
+    if (svgResource !== undefined && svgResource !== null && typeof svgResource !== 'string') {
+      throw new ServiceError('svg_resource must be a string if provided', 422);
     }
 
     const count = parseInt(playerCount, 10);
@@ -65,7 +65,7 @@ export const roomService = {
         `INSERT INTO rooms (code, svg_resource, host_id, player_count, device_type)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
-        [code, svgResource, hostId, count, deviceType]
+        [code, svgResource || null, hostId, count, deviceType]
       );
       const room = rows[0];
 
@@ -112,7 +112,7 @@ export const roomService = {
             throw new ServiceError(`Cannot join a room created on a different platform (${room.device_type})`, 400);
           }
 
-          // Check if user is already a member (rejoining)
+          // Check if user is already an active member (rejoining)
           const existingRes = await client.query(
             'SELECT * FROM room_members WHERE room_id = $1 AND user_id = $2',
             [room.id, userId]
@@ -120,21 +120,17 @@ export const roomService = {
 
           if (existingRes.rows[0]) {
             const existingMember = existingRes.rows[0];
-            await client.query(
-              `UPDATE room_members
-               SET left_at = NULL, name = COALESCE($3, name, $4)
-               WHERE room_id = $1 AND user_id = $2`,
-              [room.id, userId, name || null, getDefaultUserName(userId)]
-            );
-            return {
-              room,
-              slot_index: existingMember.slot_index,
-            };
+            if (existingMember.left_at === null && existingMember.slot_index !== null) {
+              return {
+                room,
+                slot_index: existingMember.slot_index,
+              };
+            }
           }
 
-          // Calculate available slots
+          // Calculate available slots (only active members holding slots)
           const takenRes = await client.query(
-            'SELECT slot_index FROM room_members WHERE room_id = $1 AND slot_index IS NOT NULL',
+            'SELECT slot_index FROM room_members WHERE room_id = $1 AND left_at IS NULL AND slot_index IS NOT NULL',
             [room.id]
           );
           const takenSlots = new Set(takenRes.rows.map((r) => r.slot_index));
@@ -154,11 +150,20 @@ export const roomService = {
           const slotIndex = availableSlots[Math.floor(Math.random() * availableSlots.length)];
           const memberName = name || getDefaultUserName(userId);
 
-          await client.query(
-            `INSERT INTO room_members (room_id, user_id, slot_index, name)
-             VALUES ($1, $2, $3, $4)`,
-            [room.id, userId, slotIndex, memberName]
-          );
+          if (existingRes.rows[0]) {
+            await client.query(
+              `UPDATE room_members
+               SET left_at = NULL, slot_index = $3, name = COALESCE($4, name, $5)
+               WHERE room_id = $1 AND user_id = $2`,
+              [room.id, userId, slotIndex, name || null, getDefaultUserName(userId)]
+            );
+          } else {
+            await client.query(
+              `INSERT INTO room_members (room_id, user_id, slot_index, name)
+               VALUES ($1, $2, $3, $4)`,
+              [room.id, userId, slotIndex, memberName]
+            );
+          }
 
           return {
             room,
@@ -178,16 +183,42 @@ export const roomService = {
 
   /**
    * Leave a multiplayer room
+   * If host leaves, the room session is closed for all members.
+   * If non-host leaves, their slot is freed up for other players.
    */
   async leaveRoom({ roomId, userId }) {
     if (!roomId) throw new ServiceError('room_id is required', 422);
 
     return await withTransaction(async (client) => {
-      await client.query('SELECT 1 FROM rooms WHERE id = $1 FOR UPDATE', [roomId]);
+      const roomRes = await client.query('SELECT * FROM rooms WHERE id = $1 FOR UPDATE', [roomId]);
+      const room = roomRes.rows[0];
+      if (!room) {
+        throw new ServiceError('Room not found', 404);
+      }
 
+      const isHost = room.host_id === userId;
+
+      if (isHost) {
+        // Host departure closes room and releases all slots
+        await client.query(
+          `UPDATE room_members
+           SET left_at = NOW(), slot_index = NULL
+           WHERE room_id = $1 AND left_at IS NULL`,
+          [roomId]
+        );
+
+        return {
+          left: true,
+          is_host: true,
+          room_closed: true,
+          remaining_members: 0,
+        };
+      }
+
+      // Non-host departure frees their slot
       await client.query(
         `UPDATE room_members
-         SET left_at = NOW()
+         SET left_at = NOW(), slot_index = NULL
          WHERE room_id = $1 AND user_id = $2 AND left_at IS NULL`,
         [roomId, userId]
       );
@@ -200,6 +231,8 @@ export const roomService = {
 
       return {
         left: true,
+        is_host: false,
+        room_closed: false,
         remaining_members: remainingCount,
       };
     });
@@ -234,18 +267,18 @@ export const roomService = {
    */
   async isRoomMember(roomId, userId) {
     const { rowCount } = await pool.query(
-      'SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2',
+      'SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2 AND left_at IS NULL',
       [roomId, userId]
     );
     return (rowCount || 0) > 0;
   },
 
   /**
-   * Get raw member record
+   * Get active member record (returns null if user never joined via REST or has already left)
    */
   async getRoomMemberRaw(roomId, userId) {
     const res = await pool.query(
-      'SELECT * FROM room_members WHERE room_id = $1 AND user_id = $2',
+      'SELECT * FROM room_members WHERE room_id = $1 AND user_id = $2 AND left_at IS NULL',
       [roomId, userId]
     );
     return res.rows[0] || null;

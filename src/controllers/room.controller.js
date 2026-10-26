@@ -9,7 +9,7 @@ export const roomController = {
    */
   async createRoom(req, res, next) {
     try {
-      const { svg_resource, player_count = 2, name } = req.body || {};
+      const { svg_resource = null, player_count = 2, name } = req.body || {};
       const hostId = req.userId;
       const deviceType = req.deviceType;
 

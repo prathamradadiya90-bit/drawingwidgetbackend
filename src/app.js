@@ -13,7 +13,11 @@ app.use(morgan('dev'));
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
-// Health Check
+// Lightweight Ping (instant wake up, 0 DB query overhead)
+app.get('/ping', (req, res) => res.status(200).send('pong'));
+app.get('/api/v1/ping', (req, res) => res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() }));
+
+// Health Check (verifies DB connectivity)
 app.get('/health', async (req, res) => {
   let dbStatus = 'disconnected';
   try {
