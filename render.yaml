@@ -1,0 +1,26 @@
+databases:
+  - name: drawing-widget-db
+    databaseName: lockscreen_drawing
+    user: lockscreen_user
+    plan: free
+
+services:
+  - type: web
+    name: drawing-widget-backend
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run db:migrate && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: drawing-widget-db
+          property: connectionString
+      - key: DATABASE_SSL
+        value: "true"
+      - key: ROOM_TTL_HOURS
+        value: "24"
+      - key: ROOM_REAP_INTERVAL_MINUTES
+        value: "60"
