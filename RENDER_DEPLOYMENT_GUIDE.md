@@ -40,7 +40,7 @@ git add .
 git commit -m "Initial commit with Render deployment blueprint and guides"
 
 # 2. Point git remote 'origin' to your new repository URL:
-git remote set-url origin https://github.com/<your-username>/drawing-widget-ios-backend.git
+git remote set-url origin https://github.com/prathamradadiya90-bit/drawingwidgetbackend.git
 
 # 3. Ensure branch is named 'main'
 git branch -M main
@@ -49,7 +49,7 @@ git branch -M main
 git push -u origin main
 ```
 
-*(If you use SSH instead of HTTPS, use `git remote set-url origin git@github.com:<your-username>/drawing-widget-ios-backend.git`)*
+*(If you use SSH instead of HTTPS, use `git remote set-url origin git@github.com:prathamradadiya90-bit/drawingwidgetbackend.git`)*
 
 ---
 
