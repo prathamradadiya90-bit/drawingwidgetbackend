@@ -154,8 +154,27 @@ function normalizeStrokePayload(p) {
 
     if (p.kind === 'shape') {
       const shapeType = p.shape_type || p.shapeType || rawObj.shape_type || rawObj.shapeType || null;
-      const strokeId = p.stroke_id || p.strokeId || p.stoke_id || rawObj.stroke_id || rawObj.strokeId || rawObj.stoke_id || null;
-      const fillId = p.fill_id || p.fillId || rawObj.fill_id || rawObj.fillId || null;
+      const strokeId =
+        p.stroke_id ||
+        p.strokeId ||
+        p.stoke_id ||
+        p.stroke_color ||
+        p.strokeColor ||
+        rawObj.stroke_id ||
+        rawObj.strokeId ||
+        rawObj.stroke_color ||
+        rawObj.strokeColor ||
+        null;
+      const fillId =
+        p.fill_id ||
+        p.fillId ||
+        p.fill_color ||
+        p.fillColor ||
+        rawObj.fill_id ||
+        rawObj.fillId ||
+        rawObj.fill_color ||
+        rawObj.fillColor ||
+        null;
       const strokeWidth = p.stroke_width !== undefined
         ? p.stroke_width
         : (p.strokeWidth !== undefined
@@ -167,6 +186,8 @@ function normalizeStrokePayload(p) {
       extraFields.shape_type = shapeType;
       extraFields.stroke_id = strokeId;
       extraFields.fill_id = fillId;
+      extraFields.stroke_color = strokeId;
+      extraFields.fill_color = fillId;
       extraFields.stroke_width = strokeWidth;
       extraFields.coordinates = coordinates;
       extraFields.size = size;
