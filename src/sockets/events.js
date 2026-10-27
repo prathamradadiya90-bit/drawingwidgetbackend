@@ -124,16 +124,45 @@ function normalizeStrokePayload(p) {
   if (p.kind === 'shape' || p.kind === 'emoji') {
     const rawObj = typeof p.stroke_data === 'object' && p.stroke_data !== null ? p.stroke_data : {};
 
-    const shapeType = p.shape_type || rawObj.shape_type || null;
-    const strokeId = p.stroke_id || rawObj.stroke_id || null;
-    const fillId = p.fill_id || rawObj.fill_id || null;
-    const strokeWidth = p.stroke_width !== undefined ? p.stroke_width : (rawObj.stroke_width !== undefined ? rawObj.stroke_width : null);
-    const emojiId = p.emoji_id || rawObj.emoji_id || null;
-    const coordinates = p.coordinates || rawObj.coordinates || null;
-    const size = p.size || rawObj.size || null;
-    const angle = p.angle !== undefined ? p.angle : (rawObj.angle !== undefined ? rawObj.angle : (p.rotation !== undefined ? p.rotation : (rawObj.rotation !== undefined ? rawObj.rotation : 0)));
+    // Coordinates: extract from coordinates object or top-level x, y
+    let coordinates = p.coordinates || rawObj.coordinates || null;
+    if (!coordinates && (p.x !== undefined || rawObj.x !== undefined || p.y !== undefined || rawObj.y !== undefined)) {
+      coordinates = {
+        x: p.x !== undefined ? p.x : (rawObj.x !== undefined ? rawObj.x : 0),
+        y: p.y !== undefined ? p.y : (rawObj.y !== undefined ? rawObj.y : 0),
+      };
+    }
+
+    // Size: extract from size object or top-level width, height
+    let size = p.size || rawObj.size || null;
+    if (!size && (p.width !== undefined || rawObj.width !== undefined || p.height !== undefined || rawObj.height !== undefined)) {
+      size = {
+        width: p.width !== undefined ? p.width : (rawObj.width !== undefined ? rawObj.width : 0),
+        height: p.height !== undefined ? p.height : (rawObj.height !== undefined ? rawObj.height : 0),
+      };
+    }
+
+    // Angle of rotation: angle or rotation (default: 0)
+    const angle = p.angle !== undefined
+      ? p.angle
+      : (rawObj.angle !== undefined
+        ? rawObj.angle
+        : (p.rotation !== undefined
+          ? p.rotation
+          : (rawObj.rotation !== undefined ? rawObj.rotation : 0)));
 
     if (p.kind === 'shape') {
+      const shapeType = p.shape_type || p.shapeType || rawObj.shape_type || rawObj.shapeType || null;
+      const strokeId = p.stroke_id || p.strokeId || p.stoke_id || rawObj.stroke_id || rawObj.strokeId || rawObj.stoke_id || null;
+      const fillId = p.fill_id || p.fillId || rawObj.fill_id || rawObj.fillId || null;
+      const strokeWidth = p.stroke_width !== undefined
+        ? p.stroke_width
+        : (p.strokeWidth !== undefined
+          ? p.strokeWidth
+          : (rawObj.stroke_width !== undefined
+            ? rawObj.stroke_width
+            : (rawObj.strokeWidth !== undefined ? rawObj.strokeWidth : null)));
+
       extraFields.shape_type = shapeType;
       extraFields.stroke_id = strokeId;
       extraFields.fill_id = fillId;
@@ -142,13 +171,15 @@ function normalizeStrokePayload(p) {
       extraFields.size = size;
       extraFields.angle = angle;
     } else if (p.kind === 'emoji') {
+      const emojiId = p.emoji_id || p.emojiId || rawObj.emoji_id || rawObj.emojiId || null;
+
       extraFields.emoji_id = emojiId;
       extraFields.coordinates = coordinates;
       extraFields.size = size;
       extraFields.angle = angle;
     }
 
-    if (typeof strokeData !== 'string') {
+    if (typeof strokeData !== 'string' || strokeData === '' || strokeData === '{}') {
       strokeData = {
         ...rawObj,
         ...extraFields,
