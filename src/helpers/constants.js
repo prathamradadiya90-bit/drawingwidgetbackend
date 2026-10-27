@@ -19,7 +19,7 @@ export const SocketEvents = {
   STROKE_ERROR: 'stroke:error',
   ANDROID_STROKE_SAVED: 'android:stroke:saved',
   ROOM_CLOSED: 'room:closed',
-  ERROR: 'error',
+  ERROR: 'app:error',
 };
 
 export const DeviceTypes = {
@@ -37,6 +37,10 @@ export const RoomLimits = {
 export const SocketLimits = {
   RATE_PER_SEC: 50,
   BURST: 200,
+  MOVE_RATE_PER_SEC: 120, // 120 updates/sec for live drawing streams (Apple Pencil / 120Hz displays)
+  MOVE_BURST: 300,
+  PING_TIMEOUT_MS: 60_000, // 60s ping timeout to prevent false disconnects during long touch gestures
+  PING_INTERVAL_MS: 25_000,
   MAX_STROKE_DATA_LEN: 100_000_000, // 100MB
   MAX_CHAT_LENGTH: 10_000,
   DISCONNECT_GRACE_MS: 5_000, // 5s wait before broadcasting presence:leave

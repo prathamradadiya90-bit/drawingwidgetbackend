@@ -14,6 +14,10 @@ export function initializeSocket(httpServer) {
       methods: ['GET', 'POST'],
     },
     maxHttpBufferSize: SocketLimits.MAX_STROKE_DATA_LEN,
+    pingTimeout: SocketLimits.PING_TIMEOUT_MS,
+    pingInterval: SocketLimits.PING_INTERVAL_MS,
+    connectTimeout: 45_000,
+    transports: ['websocket', 'polling'],
   });
 
   // Attach to /v1 namespace (primary iOS/Android namespace)

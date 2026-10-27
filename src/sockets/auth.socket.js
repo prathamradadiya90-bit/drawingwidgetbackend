@@ -40,6 +40,14 @@ export const socketAuth = (socket, next) => {
         tokens: SocketLimits.BURST,
         last: Date.now(),
       },
+      actionRate: {
+        tokens: SocketLimits.BURST,
+        last: Date.now(),
+      },
+      moveRate: {
+        tokens: SocketLimits.MOVE_BURST,
+        last: Date.now(),
+      },
     };
 
     next();

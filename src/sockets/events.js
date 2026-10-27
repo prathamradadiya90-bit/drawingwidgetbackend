@@ -215,6 +215,11 @@ export function registerSocketEvents(socket, io) {
   const { userId, deviceType } = socket.data;
   logger.info(`Socket connected: ${socket.id} (user: ${userId.slice(0, 8)}, platform: ${deviceType})`);
 
+  // Handle low-level transport/socket errors gracefully
+  socket.on('error', (err) => {
+    logger.error(`Socket error on ${socket.id} (user: ${userId.slice(0, 8)}):`, err);
+  });
+
   // --- ROOM JOIN ---
   socket.on(SocketEvents.ROOM_JOIN, async (payload, ack) => {
     const roomId = payload?.room_id;
@@ -356,104 +361,118 @@ export function registerSocketEvents(socket, io) {
 
   // --- LIVE DRAWING STREAM (Zero-latency relay) ---
   socket.on(SocketEvents.STROKE_MOVE, (payload, ack) => {
-    const roomId = socket.data.roomId;
-    if (!roomId) {
-      sendSocketError(socket, SocketEvents.STROKE_MOVE, ErrorCodes.NOT_IN_ROOM, 'Socket is not in an active room. Call room:join first.', ack);
-      return;
+    try {
+      const roomId = socket.data.roomId;
+      if (!roomId) {
+        sendSocketError(socket, SocketEvents.STROKE_MOVE, ErrorCodes.NOT_IN_ROOM, 'Socket is not in an active room. Call room:join first.', ack);
+        return;
+      }
+
+      const validation = validateStrokeAdd(payload);
+      if (!validation.valid) {
+        sendSocketError(socket, SocketEvents.STROKE_MOVE, validation.code, validation.message, ack, { stroke_id: payload?.id });
+        return;
+      }
+
+      // High-frequency move rate limiting (separate token bucket from stroke:add)
+      // When points arrive faster than relay rate, drop intermediate preview frames gracefully
+      // without emitting fatal error events that disconnect the socket
+      const moveBucket = socket.data.moveRate || socket.data.rate;
+      if (!takeToken(moveBucket, SocketLimits.MOVE_RATE_PER_SEC, SocketLimits.MOVE_BURST)) {
+        if (typeof ack === 'function') ack({ ok: true, id: payload.id, throttled: true });
+        return;
+      }
+
+      // Direct relay with user_id attached — 0ms DB delay for smooth continuous drawing
+      const { strokeData: moveStrokeData, extraFields: moveExtraFields } = normalizeStrokePayload(payload);
+      socket.to(roomId).emit(SocketEvents.STROKE_MOVE, {
+        ...payload,
+        ...moveExtraFields,
+        stroke_data: moveStrokeData,
+        step_index: payload.step_index !== undefined ? payload.step_index : null,
+        user_id: userId,
+      });
+
+      if (typeof ack === 'function') ack({ ok: true, id: payload.id });
+    } catch (err) {
+      logger.error('Unexpected error in stroke:move handler:', err);
+      if (typeof ack === 'function') ack({ ok: false, error: err.message });
     }
-
-    const validation = validateStrokeAdd(payload);
-    if (!validation.valid) {
-      sendSocketError(socket, SocketEvents.STROKE_MOVE, validation.code, validation.message, ack, { stroke_id: payload?.id });
-      return;
-    }
-
-    // Item 8: Rate limit behavior
-    if (!takeToken(socket.data.rate)) {
-      sendSocketError(socket, SocketEvents.STROKE_MOVE, ErrorCodes.RATE_LIMIT_EXCEEDED, 'Stroke rate limit exceeded. Please slow down.', ack, { stroke_id: payload.id });
-      return;
-    }
-
-    // Direct relay with user_id attached — 0ms DB delay for smooth continuous drawing
-    const { strokeData: moveStrokeData, extraFields: moveExtraFields } = normalizeStrokePayload(payload);
-    socket.to(roomId).emit(SocketEvents.STROKE_MOVE, {
-      ...payload,
-      ...moveExtraFields,
-      stroke_data: moveStrokeData,
-      step_index: payload.step_index !== undefined ? payload.step_index : null,
-      user_id: userId,
-    });
-
-    if (typeof ack === 'function') ack({ ok: true, id: payload.id });
   });
 
   // --- FINALIZED STROKE ADD ---
   socket.on(SocketEvents.STROKE_ADD, async (payload, ack) => {
-    const roomId = socket.data.roomId;
-    if (!roomId) {
-      sendSocketError(socket, SocketEvents.STROKE_ADD, ErrorCodes.NOT_IN_ROOM, 'Socket is not in an active room. Call room:join first.', ack);
-      return;
-    }
-
-    // Item 2: Send error back for bad stroke events
-    const validation = validateStrokeAdd(payload);
-    if (!validation.valid) {
-      sendSocketError(socket, SocketEvents.STROKE_ADD, validation.code, validation.message, ack, { stroke_id: payload?.id });
-      return;
-    }
-
-    // Item 8: Rate limit behavior
-    if (!takeToken(socket.data.rate)) {
-      sendSocketError(socket, SocketEvents.STROKE_ADD, ErrorCodes.RATE_LIMIT_EXCEEDED, 'Stroke rate limit exceeded. Please slow down.', ack, { stroke_id: payload.id });
-      return;
-    }
-
-    // Item 7: Accept the same stroke twice safely (idempotent resend upon reconnect)
-    if (isStrokeSeen(roomId, payload.id)) {
-      if (typeof ack === 'function') {
-        ack({ ok: true, id: payload.id, saved: true, duplicate: true });
-      }
-      socket.emit(SocketEvents.STROKE_SAVED, { id: payload.id, ok: true, duplicate: true });
-      return;
-    }
-
-    markStrokeSeen(roomId, payload.id);
-
-    const { strokeData, extraFields } = normalizeStrokePayload(payload);
-    const stroke = {
-      id: payload.id,
-      roomId,
-      userId,
-      stepIndex: payload.step_index !== undefined ? payload.step_index : null,
-      kind: payload.kind,
-      strokeData,
-      createdAt: new Date().toISOString(),
-    };
-
-    // Broadcast immediately to peers for 0-latency live rendering
-    socket.to(roomId).emit(SocketEvents.STROKE_ADD, {
-      id: stroke.id,
-      room_id: roomId,
-      user_id: userId,
-      step_index: stroke.stepIndex,
-      kind: stroke.kind,
-      stroke_data: stroke.strokeData,
-      ...extraFields,
-      created_at: stroke.createdAt,
-    });
-
-    // Item 6: Persist stroke and confirm saved to sender
     try {
-      await strokeService.saveStroke(stroke);
-      if (typeof ack === 'function') {
-        ack({ ok: true, id: stroke.id, saved: true });
+      const roomId = socket.data.roomId;
+      if (!roomId) {
+        sendSocketError(socket, SocketEvents.STROKE_ADD, ErrorCodes.NOT_IN_ROOM, 'Socket is not in an active room. Call room:join first.', ack);
+        return;
       }
-      socket.emit(SocketEvents.STROKE_SAVED, { id: stroke.id, ok: true });
+
+      // Item 2: Send error back for bad stroke events
+      const validation = validateStrokeAdd(payload);
+      if (!validation.valid) {
+        sendSocketError(socket, SocketEvents.STROKE_ADD, validation.code, validation.message, ack, { stroke_id: payload?.id });
+        return;
+      }
+
+      // Item 8: Rate limit behavior for database persistence (uses dedicated actionRate bucket)
+      const actionBucket = socket.data.actionRate || socket.data.rate;
+      if (!takeToken(actionBucket, SocketLimits.RATE_PER_SEC, SocketLimits.BURST)) {
+        sendSocketError(socket, SocketEvents.STROKE_ADD, ErrorCodes.RATE_LIMIT_EXCEEDED, 'Stroke rate limit exceeded. Please slow down.', ack, { stroke_id: payload.id });
+        return;
+      }
+
+      // Item 7: Accept the same stroke twice safely (idempotent resend upon reconnect)
+      if (isStrokeSeen(roomId, payload.id)) {
+        if (typeof ack === 'function') {
+          ack({ ok: true, id: payload.id, saved: true, duplicate: true });
+        }
+        socket.emit(SocketEvents.STROKE_SAVED, { id: payload.id, ok: true, duplicate: true });
+        return;
+      }
+
+      markStrokeSeen(roomId, payload.id);
+
+      const { strokeData, extraFields } = normalizeStrokePayload(payload);
+      const stroke = {
+        id: payload.id,
+        roomId,
+        userId,
+        stepIndex: payload.step_index !== undefined ? payload.step_index : null,
+        kind: payload.kind,
+        strokeData,
+        createdAt: new Date().toISOString(),
+      };
+
+      // Broadcast immediately to peers for 0-latency live rendering
+      socket.to(roomId).emit(SocketEvents.STROKE_ADD, {
+        id: stroke.id,
+        room_id: roomId,
+        user_id: userId,
+        step_index: stroke.stepIndex,
+        kind: stroke.kind,
+        stroke_data: stroke.strokeData,
+        ...extraFields,
+        created_at: stroke.createdAt,
+      });
+
+      // Item 6: Persist stroke and confirm saved to sender
+      try {
+        await strokeService.saveStroke(stroke);
+        if (typeof ack === 'function') {
+          ack({ ok: true, id: stroke.id, saved: true });
+        }
+        socket.emit(SocketEvents.STROKE_SAVED, { id: stroke.id, ok: true });
+      } catch (err) {
+        logger.error(`Failed to persist stroke ${stroke.id}:`, err);
+        // Remove from seen cache so the client can retry saving
+        roomRecentStrokes.get(roomId)?.delete(stroke.id);
+        sendSocketError(socket, SocketEvents.STROKE_ADD, ErrorCodes.SAVE_FAILED, 'Failed to persist stroke to database', ack, { id: stroke.id });
+      }
     } catch (err) {
-      logger.error(`Failed to persist stroke ${stroke.id}:`, err);
-      // Remove from seen cache so the client can retry saving
-      roomRecentStrokes.get(roomId)?.delete(stroke.id);
-      sendSocketError(socket, SocketEvents.STROKE_ADD, ErrorCodes.SAVE_FAILED, 'Failed to persist stroke to database', ack, { id: stroke.id });
+      logger.error('Unexpected error in stroke:add handler:', err);
+      if (typeof ack === 'function') ack({ ok: false, error: err.message });
     }
   });
 
@@ -471,7 +490,8 @@ export function registerSocketEvents(socket, io) {
       return;
     }
 
-    if (!takeToken(socket.data.rate)) {
+    const actionBucket = socket.data.actionRate || socket.data.rate;
+    if (!takeToken(actionBucket, SocketLimits.RATE_PER_SEC, SocketLimits.BURST)) {
       sendSocketError(socket, SocketEvents.STROKE_ERASE, ErrorCodes.RATE_LIMIT_EXCEEDED, 'Rate limit exceeded. Please slow down.', ack);
       return;
     }
@@ -511,95 +531,114 @@ export function registerSocketEvents(socket, io) {
 
   // --- ANDROID LIVE DRAWING RELAY ---
   socket.on(SocketEvents.ANDROID_STROKE_MOVE, (payload, ack) => {
-    const roomId = socket.data.roomId;
-    if (!roomId) {
-      sendSocketError(socket, SocketEvents.ANDROID_STROKE_MOVE, ErrorCodes.NOT_IN_ROOM, 'Socket is not in an active room', ack);
-      return;
+    try {
+      const roomId = socket.data.roomId;
+      if (!roomId) {
+        sendSocketError(socket, SocketEvents.ANDROID_STROKE_MOVE, ErrorCodes.NOT_IN_ROOM, 'Socket is not in an active room', ack);
+        return;
+      }
+
+      const moveBucket = socket.data.moveRate || socket.data.rate;
+      if (!takeToken(moveBucket, SocketLimits.MOVE_RATE_PER_SEC, SocketLimits.MOVE_BURST)) {
+        if (typeof ack === 'function') ack({ ok: true, throttled: true });
+        return;
+      }
+
+      socket.to(roomId).emit(SocketEvents.ANDROID_STROKE_MOVE, {
+        ...payload,
+        user_id: userId,
+      });
+
+      if (typeof ack === 'function') ack({ ok: true });
+    } catch (err) {
+      logger.error('Unexpected error in android:stroke:move handler:', err);
+      if (typeof ack === 'function') ack({ ok: false, error: err.message });
     }
-
-    socket.to(roomId).emit(SocketEvents.ANDROID_STROKE_MOVE, {
-      ...payload,
-      user_id: userId,
-    });
-
-    if (typeof ack === 'function') ack({ ok: true });
   });
 
   // --- ANDROID STROKE ADD ---
   socket.on(SocketEvents.ANDROID_STROKE_ADD, async (payload, ack) => {
-    const roomId = socket.data.roomId;
-    if (!roomId) {
-      sendSocketError(socket, SocketEvents.ANDROID_STROKE_ADD, ErrorCodes.NOT_IN_ROOM, 'Socket is not in an active room', ack);
-      return;
-    }
-
-    if (!isValidAndroidStrokeAdd(payload)) {
-      sendSocketError(socket, SocketEvents.ANDROID_STROKE_ADD, ErrorCodes.INVALID_STROKE_DATA, 'Invalid Android stroke payload', ack);
-      return;
-    }
-
-    if (!takeToken(socket.data.rate)) {
-      sendSocketError(socket, SocketEvents.ANDROID_STROKE_ADD, ErrorCodes.RATE_LIMIT_EXCEEDED, 'Rate limit exceeded. Please slow down.', ack);
-      return;
-    }
-
-    const strokeId = payload.id || crypto.randomUUID();
-
-    // Deduplication check
-    if (isStrokeSeen(roomId, strokeId)) {
-      if (typeof ack === 'function') ack({ ok: true, id: strokeId, saved: true, duplicate: true });
-      socket.emit(SocketEvents.ANDROID_STROKE_SAVED, { id: strokeId, ok: true, duplicate: true });
-      return;
-    }
-
-    markStrokeSeen(roomId, strokeId);
-
-    const stroke = {
-      id: strokeId,
-      roomId,
-      userId,
-      eventType: payload.event_type,
-      strokeData: payload.stroke_data || {},
-      createdAt: new Date().toISOString(),
-    };
-
-    socket.to(roomId).emit(SocketEvents.ANDROID_STROKE_ADD, {
-      id: stroke.id,
-      room_id: roomId,
-      user_id: userId,
-      event_type: stroke.eventType,
-      stroke_data: stroke.strokeData,
-      created_at: stroke.createdAt,
-    });
-
     try {
-      await strokeService.saveAndroidStroke(stroke);
-      if (typeof ack === 'function') ack({ ok: true, id: stroke.id, saved: true });
-      socket.emit(SocketEvents.ANDROID_STROKE_SAVED, { id: stroke.id, ok: true });
+      const roomId = socket.data.roomId;
+      if (!roomId) {
+        sendSocketError(socket, SocketEvents.ANDROID_STROKE_ADD, ErrorCodes.NOT_IN_ROOM, 'Socket is not in an active room', ack);
+        return;
+      }
+
+      if (!isValidAndroidStrokeAdd(payload)) {
+        sendSocketError(socket, SocketEvents.ANDROID_STROKE_ADD, ErrorCodes.INVALID_STROKE_DATA, 'Invalid Android stroke payload', ack);
+        return;
+      }
+
+      const actionBucket = socket.data.actionRate || socket.data.rate;
+      if (!takeToken(actionBucket, SocketLimits.RATE_PER_SEC, SocketLimits.BURST)) {
+        sendSocketError(socket, SocketEvents.ANDROID_STROKE_ADD, ErrorCodes.RATE_LIMIT_EXCEEDED, 'Rate limit exceeded. Please slow down.', ack);
+        return;
+      }
+
+      const strokeId = payload.id || crypto.randomUUID();
+
+      // Deduplication check
+      if (isStrokeSeen(roomId, strokeId)) {
+        if (typeof ack === 'function') ack({ ok: true, id: strokeId, saved: true, duplicate: true });
+        socket.emit(SocketEvents.ANDROID_STROKE_SAVED, { id: strokeId, ok: true, duplicate: true });
+        return;
+      }
+
+      markStrokeSeen(roomId, strokeId);
+
+      const stroke = {
+        id: strokeId,
+        roomId,
+        userId,
+        eventType: payload.event_type,
+        strokeData: payload.stroke_data || {},
+        createdAt: new Date().toISOString(),
+      };
+
+      socket.to(roomId).emit(SocketEvents.ANDROID_STROKE_ADD, {
+        id: stroke.id,
+        room_id: roomId,
+        user_id: userId,
+        event_type: stroke.eventType,
+        stroke_data: stroke.strokeData,
+        created_at: stroke.createdAt,
+      });
+
+      try {
+        await strokeService.saveAndroidStroke(stroke);
+        if (typeof ack === 'function') ack({ ok: true, id: stroke.id, saved: true });
+        socket.emit(SocketEvents.ANDROID_STROKE_SAVED, { id: stroke.id, ok: true });
+      } catch (err) {
+        logger.error(`Failed to persist Android stroke for room ${roomId}:`, err);
+        roomRecentStrokes.get(roomId)?.delete(stroke.id);
+        sendSocketError(socket, SocketEvents.ANDROID_STROKE_ADD, ErrorCodes.SAVE_FAILED, 'Failed to persist Android stroke', ack, { id: stroke.id });
+      }
     } catch (err) {
-      logger.error(`Failed to persist Android stroke for room ${roomId}:`, err);
-      roomRecentStrokes.get(roomId)?.delete(stroke.id);
-      sendSocketError(socket, SocketEvents.ANDROID_STROKE_ADD, ErrorCodes.SAVE_FAILED, 'Failed to persist Android stroke', ack, { id: stroke.id });
+      logger.error('Unexpected error in android:stroke:add handler:', err);
+      if (typeof ack === 'function') ack({ ok: false, error: err.message });
     }
   });
 
   // --- LIVE CHAT ---
   socket.on(SocketEvents.CHAT_ADD, async (payload, ack) => {
-    const roomId = socket.data.roomId;
-    if (!roomId) {
-      sendSocketError(socket, SocketEvents.CHAT_ADD, ErrorCodes.NOT_IN_ROOM, 'Socket is not in an active room', ack);
-      return;
-    }
+    try {
+      const roomId = socket.data.roomId;
+      if (!roomId) {
+        sendSocketError(socket, SocketEvents.CHAT_ADD, ErrorCodes.NOT_IN_ROOM, 'Socket is not in an active room', ack);
+        return;
+      }
 
-    if (!isValidChatAdd(payload)) {
-      sendSocketError(socket, SocketEvents.CHAT_ADD, ErrorCodes.INVALID_STROKE_DATA, 'Message must be between 1 and 10,000 characters', ack);
-      return;
-    }
+      if (!isValidChatAdd(payload)) {
+        sendSocketError(socket, SocketEvents.CHAT_ADD, ErrorCodes.INVALID_STROKE_DATA, 'Message must be between 1 and 10,000 characters', ack);
+        return;
+      }
 
-    if (!takeToken(socket.data.rate)) {
-      sendSocketError(socket, SocketEvents.CHAT_ADD, ErrorCodes.RATE_LIMIT_EXCEEDED, 'Chat rate limit exceeded. Please slow down.', ack);
-      return;
-    }
+      const actionBucket = socket.data.actionRate || socket.data.rate;
+      if (!takeToken(actionBucket, SocketLimits.RATE_PER_SEC, SocketLimits.BURST)) {
+        sendSocketError(socket, SocketEvents.CHAT_ADD, ErrorCodes.RATE_LIMIT_EXCEEDED, 'Chat rate limit exceeded. Please slow down.', ack);
+        return;
+      }
 
     const chatId = payload.id || crypto.randomUUID();
     const member = await roomService.getRoomMemberRaw(roomId, userId);
@@ -628,6 +667,10 @@ export function registerSocketEvents(socket, io) {
       logger.error(`Failed to persist chat message ${chat.id}:`, err);
       sendSocketError(socket, SocketEvents.CHAT_ADD, ErrorCodes.SAVE_FAILED, 'Failed to persist chat message', ack, { id: chat.id });
     }
+  } catch (err) {
+    logger.error('Unexpected error in chat:add handler:', err);
+    if (typeof ack === 'function') ack({ ok: false, error: err.message });
+  }
   });
 
   // --- DISCONNECT ---

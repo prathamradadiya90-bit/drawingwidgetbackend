@@ -49,8 +49,10 @@ export const strokeService = {
           parsed = JSON.parse(parsed);
         } catch (_) {}
       }
+      const extra = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : {};
       return {
         ...r,
+        ...extra,
         stroke_data: parsed,
       };
     });
