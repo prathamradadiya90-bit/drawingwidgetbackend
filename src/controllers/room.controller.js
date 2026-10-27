@@ -9,14 +9,25 @@ export const roomController = {
    */
   async createRoom(req, res, next) {
     try {
-      const { svg_resource = null, player_count = 2, name } = req.body || {};
+      const {
+        svg_resource = null,
+        player_count = 2,
+        name,
+        profile_image,
+        profileImage,
+        avatar_url,
+        avatarUrl,
+        avatar,
+      } = req.body || {};
       const hostId = req.userId;
       const deviceType = req.deviceType;
+      const userProfileImage = profile_image || profileImage || avatar_url || avatarUrl || avatar || null;
 
       const result = await roomService.createRoom({
         svgResource: svg_resource,
         playerCount: player_count,
         name,
+        profileImage: userProfileImage,
         hostId,
         deviceType,
       });
@@ -36,13 +47,23 @@ export const roomController = {
    */
   async joinRoom(req, res, next) {
     try {
-      const { code, name } = req.body || {};
+      const {
+        code,
+        name,
+        profile_image,
+        profileImage,
+        avatar_url,
+        avatarUrl,
+        avatar,
+      } = req.body || {};
       const userId = req.userId;
       const deviceType = req.deviceType;
+      const userProfileImage = profile_image || profileImage || avatar_url || avatarUrl || avatar || null;
 
       const result = await roomService.joinRoom({
         code,
         name,
+        profileImage: userProfileImage,
         userId,
         deviceType,
       });

@@ -33,9 +33,30 @@ export const socketAuth = (socket, next) => {
         ? DeviceTypes.ANDROID
         : DeviceTypes.IOS;
 
+    const rawName =
+      headers?.['x-user-name'] ||
+      headers?.name ||
+      auth?.name ||
+      auth?.userName ||
+      auth?.username ||
+      query?.name;
+
+    const rawProfileImage =
+      headers?.['x-profile-image'] ||
+      headers?.['x-avatar-url'] ||
+      auth?.profileImage ||
+      auth?.profile_image ||
+      auth?.avatarUrl ||
+      auth?.avatar_url ||
+      auth?.avatar ||
+      query?.profileImage ||
+      query?.profile_image;
+
     socket.data = {
       userId: rawUserId.trim().toLowerCase(),
       deviceType,
+      name: typeof rawName === 'string' && rawName.trim().length > 0 ? rawName.trim() : null,
+      profileImage: typeof rawProfileImage === 'string' && rawProfileImage.trim().length > 0 ? rawProfileImage.trim() : null,
       rate: {
         tokens: SocketLimits.BURST,
         last: Date.now(),

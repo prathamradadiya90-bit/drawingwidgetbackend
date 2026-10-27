@@ -3,6 +3,7 @@ import { SocketEvents, SocketLimits, DeviceTypes, ErrorCodes } from '../helpers/
 import { roomService } from '../services/room.service.js';
 import { strokeService } from '../services/stroke.service.js';
 import { chatService } from '../services/chat.service.js';
+import { pool } from '../config/db.js';
 import { takeToken } from './rateLimiter.js';
 import { logger } from '../helpers/logger.js';
 
@@ -307,25 +308,74 @@ export function registerSocketEvents(socket, io) {
         await socket.leave(socket.data.roomId);
       }
 
+      // Check if user provided an updated name or profile_image upon socket connection / room:join
+      const incomingName = payload?.name || socket.data.name;
+      const incomingProfileImage =
+        payload?.profile_image ||
+        payload?.profileImage ||
+        payload?.avatar_url ||
+        payload?.avatarUrl ||
+        payload?.avatar ||
+        socket.data.profileImage;
+
+      let memberName = member.name;
+      let memberProfileImage = member.profile_image || null;
+
+      if (
+        (incomingName && incomingName !== member.name) ||
+        (incomingProfileImage && incomingProfileImage !== member.profile_image)
+      ) {
+        await pool.query(
+          `UPDATE room_members
+           SET name = COALESCE($3, name), profile_image = COALESCE($4, profile_image)
+           WHERE room_id = $1 AND user_id = $2`,
+          [roomId, userId, incomingName || null, incomingProfileImage || null]
+        );
+        if (incomingName) memberName = incomingName;
+        if (incomingProfileImage) memberProfileImage = incomingProfileImage;
+      }
+
       await socket.join(roomId);
       socket.data.roomId = roomId;
 
-      // Broadcast presence join to peers in this room
+      // Broadcast presence join to peers in this room with name and profile image
       socket.to(roomId).emit(SocketEvents.PRESENCE_JOIN, {
         user_id: userId,
-        name: member.name,
+        name: memberName,
+        profile_image: memberProfileImage,
+        avatar_url: memberProfileImage,
         slot_index: member.slot_index,
       });
+
+      // Retrieve full room member list so the joining client immediately sees all peer profiles
+      const { members: roomMembers } = await roomService.getRoom(roomId);
+      const formattedMembers = (roomMembers || []).map((m) => ({
+        user_id: m.user_id,
+        name: m.name,
+        profile_image: m.profile_image || null,
+        avatar_url: m.profile_image || null,
+        slot_index: m.slot_index,
+      }));
 
       if (typeof ack === 'function') {
         ack({
           ok: true,
           room_id: roomId,
+          user_id: userId,
           slot_index: member.slot_index,
-          name: member.name,
+          name: memberName,
+          profile_image: memberProfileImage,
+          avatar_url: memberProfileImage,
           reconnected: wasTemporarilyDisconnected,
+          members: formattedMembers,
         });
       }
+
+      // Also emit room:members event so client can restore player list anytime
+      socket.emit(SocketEvents.ROOM_MEMBERS, {
+        room_id: roomId,
+        members: formattedMembers,
+      });
 
       // Backfill existing strokes & chat
       try {
@@ -687,6 +737,8 @@ export function registerSocketEvents(socket, io) {
       room_id: roomId,
       user_id: userId,
       name: member?.name || 'Unknown',
+      profile_image: member?.profile_image || null,
+      avatar_url: member?.profile_image || null,
       message: chat.message,
       created_at: chat.createdAt,
     });

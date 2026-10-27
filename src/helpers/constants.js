@@ -19,6 +19,7 @@ export const SocketEvents = {
   STROKE_ERROR: 'stroke:error',
   ANDROID_STROKE_SAVED: 'android:stroke:saved',
   ROOM_CLOSED: 'room:closed',
+  ROOM_MEMBERS: 'room:members',
   ERROR: 'app:error',
 };
 

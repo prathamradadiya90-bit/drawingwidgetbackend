@@ -36,7 +36,7 @@ export const roomService = {
   /**
    * Create a new multiplayer drawing room
    */
-  async createRoom({ svgResource = null, playerCount = 2, name, hostId, deviceType = DeviceTypes.IOS }) {
+  async createRoom({ svgResource = null, playerCount = 2, name, profileImage = null, hostId, deviceType = DeviceTypes.IOS }) {
     if (svgResource !== undefined && svgResource !== null && typeof svgResource !== 'string') {
       throw new ServiceError('svg_resource must be a string if provided', 422);
     }
@@ -74,9 +74,9 @@ export const roomService = {
       const memberName = name || getDefaultUserName(hostId);
 
       await client.query(
-        `INSERT INTO room_members (room_id, user_id, slot_index, name)
-         VALUES ($1, $2, $3, $4)`,
-        [room.id, hostId, slotIndex, memberName]
+        `INSERT INTO room_members (room_id, user_id, slot_index, name, profile_image)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [room.id, hostId, slotIndex, memberName, profileImage || null]
       );
 
       return {
@@ -89,7 +89,7 @@ export const roomService = {
   /**
    * Join an existing multiplayer room using room code
    */
-  async joinRoom({ code, name, userId, deviceType = DeviceTypes.IOS }) {
+  async joinRoom({ code, name, profileImage = null, userId, deviceType = DeviceTypes.IOS }) {
     if (!code || typeof code !== 'string') {
       throw new ServiceError('Room code is required', 422);
     }
@@ -121,6 +121,15 @@ export const roomService = {
           if (existingRes.rows[0]) {
             const existingMember = existingRes.rows[0];
             if (existingMember.left_at === null && existingMember.slot_index !== null) {
+              // Update name or profileImage if provided on rejoining
+              if (name || profileImage) {
+                await client.query(
+                  `UPDATE room_members
+                   SET name = COALESCE($3, name), profile_image = COALESCE($4, profile_image)
+                   WHERE room_id = $1 AND user_id = $2`,
+                  [room.id, userId, name || null, profileImage || null]
+                );
+              }
               return {
                 room,
                 slot_index: existingMember.slot_index,
@@ -153,15 +162,15 @@ export const roomService = {
           if (existingRes.rows[0]) {
             await client.query(
               `UPDATE room_members
-               SET left_at = NULL, slot_index = $3, name = COALESCE($4, name, $5)
+               SET left_at = NULL, slot_index = $3, name = COALESCE($4, name, $5), profile_image = COALESCE($6, profile_image)
                WHERE room_id = $1 AND user_id = $2`,
-              [room.id, userId, slotIndex, name || null, getDefaultUserName(userId)]
+              [room.id, userId, slotIndex, name || null, getDefaultUserName(userId), profileImage || null]
             );
           } else {
             await client.query(
-              `INSERT INTO room_members (room_id, user_id, slot_index, name)
-               VALUES ($1, $2, $3, $4)`,
-              [room.id, userId, slotIndex, memberName]
+              `INSERT INTO room_members (room_id, user_id, slot_index, name, profile_image)
+               VALUES ($1, $2, $3, $4, $5)`,
+              [room.id, userId, slotIndex, memberName, profileImage || null]
             );
           }
 
@@ -249,7 +258,7 @@ export const roomService = {
     }
 
     const membersRes = await pool.query(
-      `SELECT user_id, slot_index, name, joined_at
+      `SELECT user_id, slot_index, name, profile_image, joined_at
        FROM room_members
        WHERE room_id = $1 AND left_at IS NULL
        ORDER BY slot_index ASC`,

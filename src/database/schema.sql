@@ -17,12 +17,13 @@ CREATE INDEX IF NOT EXISTS idx_rooms_code ON rooms(code);
 
 -- Room Members table
 CREATE TABLE IF NOT EXISTS room_members (
-    room_id     UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
-    user_id     TEXT NOT NULL,
-    slot_index  INT,
-    name        TEXT,
-    joined_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    left_at     TIMESTAMPTZ,
+    room_id        UUID NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+    user_id        TEXT NOT NULL,
+    slot_index     INT,
+    name           TEXT,
+    profile_image  TEXT,
+    joined_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    left_at        TIMESTAMPTZ,
     PRIMARY KEY (room_id, user_id)
 );
 
@@ -73,3 +74,4 @@ ALTER TABLE rooms ALTER COLUMN svg_resource DROP NOT NULL;
 ALTER TABLE room_strokes ALTER COLUMN step_index DROP NOT NULL;
 ALTER TABLE room_strokes DROP CONSTRAINT IF EXISTS room_strokes_kind_check;
 ALTER TABLE room_strokes ADD CONSTRAINT room_strokes_kind_check CHECK (kind IN ('line', 'fill', 'shape', 'emoji'));
+ALTER TABLE room_members ADD COLUMN IF NOT EXISTS profile_image TEXT;
