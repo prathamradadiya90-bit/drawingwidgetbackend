@@ -16,7 +16,9 @@ export function initializeSocket(httpServer) {
     maxHttpBufferSize: SocketLimits.MAX_STROKE_DATA_LEN,
     pingTimeout: SocketLimits.PING_TIMEOUT_MS,
     pingInterval: SocketLimits.PING_INTERVAL_MS,
-    connectTimeout: 45_000,
+    connectTimeout: 60_000,
+    allowEIO3: true,
+    perMessageDeflate: false, // Disable per-message compression to eliminate CPU deflate bottlenecks during high-frequency drawing
     transports: ['websocket', 'polling'],
   });
 

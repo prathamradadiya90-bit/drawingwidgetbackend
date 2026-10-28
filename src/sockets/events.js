@@ -84,7 +84,8 @@ function validateStrokeAdd(p) {
   if (!isValidUuid(p.id)) {
     return { valid: false, code: ErrorCodes.INVALID_STROKE_ID, message: 'Stroke id must be a valid UUID' };
   }
-  if (!VALID_KINDS.includes(p.kind)) {
+  const kind = p.kind || 'line';
+  if (!VALID_KINDS.includes(kind)) {
     return { valid: false, code: ErrorCodes.INVALID_STROKE_KIND, message: 'Stroke kind must be "line", "fill", "shape", or "emoji"' };
   }
 
@@ -272,6 +273,15 @@ export function registerSocketEvents(socket, io) {
   socket.on('error', (err) => {
     logger.error(`Socket error on ${socket.id} (user: ${userId.slice(0, 8)}):`, err);
   });
+
+  if (socket.conn) {
+    socket.conn.on('error', (err) => {
+      logger.error(`Transport error on socket ${socket.id} (user: ${userId.slice(0, 8)}):`, err);
+    });
+    socket.conn.on('close', (reason, description) => {
+      logger.info(`Transport closed for socket ${socket.id} (user: ${userId.slice(0, 8)}): reason="${reason}", description="${description || 'none'}"`);
+    });
+  }
 
   // --- ROOM JOIN ---
   socket.on(SocketEvents.ROOM_JOIN, async (payload, ack) => {
@@ -472,7 +482,8 @@ export function registerSocketEvents(socket, io) {
 
       const validation = validateStrokeAdd(payload);
       if (!validation.valid) {
-        sendSocketError(socket, SocketEvents.STROKE_MOVE, validation.code, validation.message, ack, { stroke_id: payload?.id });
+        // Do not emit disruptive stroke:error / app:error on high-frequency ephemeral preview frames
+        if (typeof ack === 'function') ack({ ok: false, error: validation.message, code: validation.code });
         return;
       }
 
