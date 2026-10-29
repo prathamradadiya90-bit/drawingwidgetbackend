@@ -40,11 +40,10 @@ export const SocketLimits = {
   BURST: 600, // Generous burst allowance for rapid multi-touch / complex stroke additions
   MOVE_RATE_PER_SEC: 180, // 180 updates/sec for live drawing streams (Apple Pencil / 120Hz displays)
   MOVE_BURST: 600,
-  PING_TIMEOUT_MS: 120_000, // 120s ping timeout to prevent false disconnects during prolonged touch gestures & high payload transfers
-  PING_INTERVAL_MS: 45_000, // 45s ping interval to minimize heartbeat traffic collision during drawing
+  PING_TIMEOUT_MS: 20_000, // 20s ping timeout to rapidly detect and handle dropped connections
+  PING_INTERVAL_MS: 20_000, // 20s ping interval to prevent Render proxy (60s) and iOS URLSession idle timeout
   MAX_STROKE_DATA_LEN: 100_000_000, // 100MB
   MAX_CHAT_LENGTH: 10_000,
-  DISCONNECT_GRACE_MS: 5_000, // 5s wait before broadcasting presence:leave
   APP_KILL_TIMEOUT_MS: 60_000, // 60s timeout after disconnect to free player slot
 };
 

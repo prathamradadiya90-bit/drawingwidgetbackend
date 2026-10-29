@@ -69,8 +69,8 @@ export const roomService = {
       );
       const room = rows[0];
 
-      // Assign host a random slot index (1..player_count)
-      const slotIndex = 1 + Math.floor(Math.random() * count);
+      // Assign host deterministic slot 1
+      const slotIndex = 1;
       const memberName = name || getDefaultUserName(hostId);
 
       await client.query(
@@ -155,8 +155,8 @@ export const roomService = {
             throw new ServiceError('Room is full', 409);
           }
 
-          // Assign a random available slot
-          const slotIndex = availableSlots[Math.floor(Math.random() * availableSlots.length)];
+          // Assign the lowest available slot (sequential 1..player_count)
+          const slotIndex = availableSlots[0];
           const memberName = name || getDefaultUserName(userId);
 
           if (existingRes.rows[0]) {

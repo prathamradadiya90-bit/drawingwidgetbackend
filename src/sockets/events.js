@@ -327,8 +327,7 @@ export function registerSocketEvents(socket, io) {
       const pendingDisconnect = disconnectTimers.get(disconnectKey);
       let wasTemporarilyDisconnected = false;
       if (pendingDisconnect) {
-        clearTimeout(pendingDisconnect.graceTimer);
-        clearTimeout(pendingDisconnect.killTimer);
+        if (pendingDisconnect.killTimer) clearTimeout(pendingDisconnect.killTimer);
         disconnectTimers.delete(disconnectKey);
         wasTemporarilyDisconnected = true;
       }
@@ -376,6 +375,7 @@ export function registerSocketEvents(socket, io) {
         profile_image: memberProfileImage,
         avatar_url: memberProfileImage,
         slot_index: member.slot_index,
+        reconnected: wasTemporarilyDisconnected,
       });
 
       // Retrieve full room member list so the joining client immediately sees all peer profiles
@@ -392,6 +392,7 @@ export function registerSocketEvents(socket, io) {
         ack({
           ok: true,
           room_id: roomId,
+          host_id: room.host_id,
           user_id: userId,
           slot_index: member.slot_index,
           name: memberName,
@@ -405,6 +406,7 @@ export function registerSocketEvents(socket, io) {
       // Also emit room:members event so client can restore player list anytime
       socket.emit(SocketEvents.ROOM_MEMBERS, {
         room_id: roomId,
+        host_id: room.host_id,
         members: formattedMembers,
       });
 
@@ -441,8 +443,7 @@ export function registerSocketEvents(socket, io) {
     const disconnectKey = `${roomId}:${userId}`;
     const pending = disconnectTimers.get(disconnectKey);
     if (pending) {
-      clearTimeout(pending.graceTimer);
-      clearTimeout(pending.killTimer);
+      if (pending.killTimer) clearTimeout(pending.killTimer);
       disconnectTimers.delete(disconnectKey);
     }
 
@@ -807,15 +808,22 @@ export function registerSocketEvents(socket, io) {
 
     const disconnectKey = `${roomId}:${userId}`;
 
-    // Item 9: Short 5-second grace period before announcing presence:leave to avoid UI flickering on brief network drops
-    const graceTimer = setTimeout(async () => {
-      try {
-        socket.to(roomId).emit(SocketEvents.PRESENCE_LEAVE, { user_id: userId });
-        logger.info(`Grace period elapsed: broadcasted presence:leave for user ${userId.slice(0, 8)} in room ${roomId}`);
-      } catch (err) {
-        logger.error('Error emitting presence:leave after grace period:', err);
-      }
-    }, SocketLimits.DISCONNECT_GRACE_MS);
+    // Cancel existing pending killTimer if any
+    const existing = disconnectTimers.get(disconnectKey);
+    if (existing?.killTimer) {
+      clearTimeout(existing.killTimer);
+    }
+
+    // Immediately broadcast presence:leave so peers are notified that the member dropped connection
+    try {
+      socket.to(roomId).emit(SocketEvents.PRESENCE_LEAVE, {
+        user_id: userId,
+        reason: reason || 'disconnected',
+      });
+      logger.info(`Broadcasted presence:leave for user ${userId.slice(0, 8)} in room ${roomId} (reason: ${reason})`);
+    } catch (err) {
+      logger.error('Error emitting presence:leave on disconnect:', err);
+    }
 
     // Item 10: 60-second app kill timeout to free player slot in database if leave call never arrives
     const killTimer = setTimeout(async () => {
@@ -836,6 +844,6 @@ export function registerSocketEvents(socket, io) {
       }
     }, SocketLimits.APP_KILL_TIMEOUT_MS);
 
-    disconnectTimers.set(disconnectKey, { graceTimer, killTimer });
+    disconnectTimers.set(disconnectKey, { killTimer });
   });
 }
