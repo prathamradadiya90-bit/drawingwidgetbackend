@@ -1,0 +1,504 @@
+{
+  "info": {
+    "_postman_id": "ttt-9b7e-462a-8921-209a341f7e99",
+    "name": "Tic Tac Toe Multiplayer API & WebSockets",
+    "description": "Complete Postman collection for testing Tic Tac Toe 2-player multiplayer backend, including HTTP REST endpoints, validation errors, and Socket.IO real-time gameplay.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "ttt_game_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ttt_game_code",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ttt_user_host",
+      "value": "ttt_user_host_001",
+      "type": "string"
+    },
+    {
+      "key": "ttt_user_guest",
+      "value": "ttt_user_guest_002",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Health & Server Info",
+      "item": [
+        {
+          "name": "Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Server status ok and db connected\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql(\"ok\");",
+                  "    pm.expect(json.database).to.eql(\"connected\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Tic Tac Toe REST Endpoints",
+      "item": [
+        {
+          "name": "1. Create Game (Host - Player X)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test(\"Game created with Host assigned symbol X\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.symbol).to.eql(\"X\");",
+                  "    pm.expect(json.data.game.status).to.eql(\"waiting\");",
+                  "    pm.expect(json.data.game.code).to.have.lengthOf(6);",
+                  "    pm.expect(json.data.players[0].user_id).to.eql(pm.collectionVariables.get(\"ttt_user_host\"));",
+                  "    pm.collectionVariables.set(\"ttt_game_id\", json.data.game.id);",
+                  "    pm.collectionVariables.set(\"ttt_game_code\", json.data.game.code);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{ttt_user_host}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alice (Host)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/tictactoe",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tictactoe"
+              ]
+            },
+            "description": "Creates a new 2-player Tic Tac Toe game. Host is automatically assigned symbol X and receives a unique 6-character game code."
+          }
+        },
+        {
+          "name": "2. Join Game via Code (Guest - Player O)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Guest joined with symbol O and game status is playing\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.symbol).to.eql(\"O\");",
+                  "    pm.expect(json.data.game.status).to.eql(\"playing\");",
+                  "    pm.expect(json.data.game.current_turn).to.eql(\"X\");",
+                  "    pm.expect(json.data.players.length).to.eql(2);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{ttt_user_guest}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{ttt_game_code}}\",\n  \"name\": \"Bob (Guest)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/tictactoe/join",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tictactoe",
+                "join"
+              ]
+            },
+            "description": "Joins an existing game using the 6-character room code. Guest is assigned symbol O and the game transitions to 'playing'."
+          }
+        },
+        {
+          "name": "3. Get Game Details by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Returns game board, state, and active players\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.game.id).to.eql(pm.collectionVariables.get(\"ttt_game_id\"));",
+                  "    pm.expect(json.data.players.length).to.eql(2);",
+                  "    pm.expect(json.data.game.board.length).to.eql(9);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/tictactoe/{{ttt_game_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tictactoe",
+                "{{ttt_game_id}}"
+              ]
+            },
+            "description": "Fetches full details of a Tic Tac Toe game including current 9-cell board state, player list, status, and turn."
+          }
+        },
+        {
+          "name": "4. Get Game Details by Code",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Resolves game details by 6-char code\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.game.code).to.eql(pm.collectionVariables.get(\"ttt_game_code\"));",
+                  "    pm.expect(json.data.game.id).to.eql(pm.collectionVariables.get(\"ttt_game_id\"));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/tictactoe/code/{{ttt_game_code}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tictactoe",
+                "code",
+                "{{ttt_game_code}}"
+              ]
+            },
+            "description": "Resolves game state and player seats by the 6-character room code."
+          }
+        },
+        {
+          "name": "5. Get Game Moves History",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Returns list of game moves\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(Array.isArray(json.data.moves)).to.be.true;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/tictactoe/{{ttt_game_id}}/moves",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tictactoe",
+                "{{ttt_game_id}}",
+                "moves"
+              ]
+            },
+            "description": "Returns the sequential list of moves made during the current round with timestamps, user IDs, symbols, and cell indices."
+          }
+        },
+        {
+          "name": "6. Error: Missing User ID Header (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 401 Unauthorized\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "pm.test(\"Returns missing user id error\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.false;",
+                  "    pm.expect(json.error).to.include(\"Missing or invalid user id header\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Anonymous\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/tictactoe",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tictactoe"
+              ]
+            },
+            "description": "Verifies that creating a game without x-user-id header is rejected with HTTP 401."
+          }
+        },
+        {
+          "name": "7. Error: Join Invalid Game Code (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 404 Not Found\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test(\"Returns game not found error\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.false;",
+                  "    pm.expect(json.error).to.include(\"No game found with code\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{ttt_user_guest}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"ZZZZZZ\",\n  \"name\": \"Bob (Guest)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/tictactoe/join",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tictactoe",
+                "join"
+              ]
+            },
+            "description": "Verifies that attempting to join with a non-existent code returns HTTP 404."
+          }
+        },
+        {
+          "name": "8. Error: Join Game Already Full (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 409 Conflict\", function () {",
+                  "    pm.response.to.have.status(409);",
+                  "});",
+                  "pm.test(\"Returns game full or ended error\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.false;",
+                  "    pm.expect(json.error).to.include(\"This game is full or has already ended\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "intruder_user_303",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{ttt_game_code}}\",\n  \"name\": \"Charlie (3rd Player)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/tictactoe/join",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tictactoe",
+                "join"
+              ]
+            },
+            "description": "Verifies that a 3rd player trying to join an already playing game is rejected with HTTP 409 Conflict."
+          }
+        }
+      ]
+    }
+  ]
+}

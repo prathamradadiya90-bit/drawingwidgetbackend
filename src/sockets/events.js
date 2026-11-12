@@ -39,7 +39,7 @@ function isStrokeSeen(roomId, strokeId) {
 /**
  * Send structured error back to socket client via ack callback and error events
  */
-function sendSocketError(socket, eventName, code, message, ack, extra = {}) {
+export function sendSocketError(socket, eventName, code, message, ack, extra = {}) {
   const errorPayload = {
     ok: false,
     error: message,

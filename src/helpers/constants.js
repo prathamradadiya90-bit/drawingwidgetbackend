@@ -8,6 +8,10 @@ export const SocketEvents = {
   ANDROID_STROKE_ADD: 'android:stroke:add',
   ANDROID_STROKE_MOVE: 'android:stroke:move',
   CHAT_ADD: 'chat:add',
+  TTT_GAME_JOIN: 'ttt:game:join',
+  TTT_GAME_LEAVE: 'ttt:game:leave',
+  TTT_MOVE: 'ttt:move',
+  TTT_RESTART: 'ttt:restart',
 
   // Server -> Client
   PRESENCE_JOIN: 'presence:join',
@@ -20,6 +24,12 @@ export const SocketEvents = {
   ANDROID_STROKE_SAVED: 'android:stroke:saved',
   ROOM_CLOSED: 'room:closed',
   ROOM_MEMBERS: 'room:members',
+  TTT_PLAYER_JOINED: 'ttt:player:joined',
+  TTT_PLAYER_LEFT: 'ttt:player:left',
+  TTT_PLAYER_DISCONNECTED: 'ttt:player:disconnected',
+  TTT_MOVE_MADE: 'ttt:move:made',
+  TTT_GAME_OVER: 'ttt:game:over',
+  TTT_GAME_RESTARTED: 'ttt:game:restarted',
   ERROR: 'app:error',
 };
 
@@ -35,6 +45,34 @@ export const RoomLimits = {
   CODE_ALPHABET: 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789',
 };
 
+export const TicTacToe = {
+  BOARD_SIZE: 9,
+  EMPTY_CELL: '-',
+  Symbols: { X: 'X', O: 'O' },
+  GameStatus: {
+    WAITING: 'waiting',
+    PLAYING: 'playing',
+    FINISHED: 'finished',
+    ABANDONED: 'abandoned',
+  },
+  EndReason: {
+    WIN: 'WIN',
+    DRAW: 'DRAW',
+    OPPONENT_LEFT: 'OPPONENT_LEFT',
+    OPPONENT_DISCONNECTED: 'OPPONENT_DISCONNECTED',
+  },
+  WIN_LINES: [
+    [0, 1, 2],
+    [3, 4, 5],
+    [6, 7, 8],
+    [0, 3, 6],
+    [1, 4, 7],
+    [2, 5, 8],
+    [0, 4, 8],
+    [2, 4, 6],
+  ],
+};
+
 export const SocketLimits = {
   RATE_PER_SEC: 120, // 120 updates/sec for persistent stroke actions
   BURST: 600, // Generous burst allowance for rapid multi-touch / complex stroke additions
@@ -45,6 +83,7 @@ export const SocketLimits = {
   MAX_STROKE_DATA_LEN: 100_000_000, // 100MB
   MAX_CHAT_LENGTH: 10_000,
   APP_KILL_TIMEOUT_MS: 60_000, // 60s timeout after disconnect to free player slot
+  TTT_FORFEIT_TIMEOUT_MS: 60_000, // 60s for a dropped Tic Tac Toe player to reconnect before forfeiting
 };
 
 export const ErrorCodes = {
@@ -63,4 +102,8 @@ export const ErrorCodes = {
   PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
   RATE_LIMIT_EXCEEDED: 'RATE_LIMIT_EXCEEDED',
   SAVE_FAILED: 'SAVE_FAILED',
+  GAME_NOT_FOUND: 'GAME_NOT_FOUND',
+  NOT_IN_GAME: 'NOT_IN_GAME',
+  MOVE_FAILED: 'MOVE_FAILED',
+  RESTART_FAILED: 'RESTART_FAILED',
 };

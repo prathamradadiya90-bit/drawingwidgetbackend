@@ -9,9 +9,10 @@ const __dirname = dirname(__filename);
 
 export async function runMigrations() {
   try {
-    const schemaSql = readFileSync(join(__dirname, 'schema.sql'), 'utf-8');
     logger.info('Applying database schema migrations...');
-    await pool.query(schemaSql);
+    for (const file of ['schema.sql', 'tictactoe_schema.sql']) {
+      await pool.query(readFileSync(join(__dirname, file), 'utf-8'));
+    }
     logger.info('Database schema applied successfully.');
     return true;
   } catch (error) {
