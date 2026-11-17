@@ -1,196 +1,427 @@
-# Knife Game: Frontend (iOS / Swift) Developer Integration Cheat Sheet
+# Knife Game Multiplayer: iOS Frontend Developer Cheat Sheet
+
+A comprehensive, developer-ready specification and cheat sheet for integrating the **Knife Game Multiplayer** backend in iOS (Swift) using **REST** and **Socket.IO**.
+
+---
+
+## 1. Connection & Handshake Authentication
+
+- **Socket.IO Base URL:** `https://drawing-widget-backend.onrender.com/v1` *(or `http://localhost:3000/v1` for local dev)*
+- **Namespace:** `/v1`
+- **Transport:** `websocket`
+
+### Handshake Auth & Headers
+
+Pass these in your Socket.IO client configuration:
+
+| Parameter | Type | Required | Description | Example |
+| :--- | :--- | :---: | :--- | :--- |
+| `userId` / `x-user-id` | `String` | **Yes** | Client user identifier (min 2 chars) | `"knife_user_001"` |
+| `devicetype` | `String` | Optional | Device platform (`"ios"` or `"android"`) | `"ios"` |
+| `name` | `String` | Optional | User display name | `"Alice"` |
+| `profileImage` | `String` | Optional | User avatar identifier | `"A7"` |
+
+```swift
+let manager = SocketManager(
+    socketURL: URL(string: "https://drawing-widget-backend.onrender.com/v1")!,
+    config: [
+        .log(false),
+        .compress,
+        .forceWebsockets(true),
+        .connectParams([
+            "userId": currentUserId,
+            "devicetype": "ios",
+            "name": currentUserName,
+            "profileImage": currentAvatarId // e.g. "A7"
+        ])
+    ]
+)
+let socket = manager.defaultSocket
+```
+
+---
+
+## 2. REST Lobby Endpoints
+
+All REST requests require the `x-user-id` header. Responses are wrapped in `{ success, message, data }`.
+
+```mermaid
+flowchart LR
+    A["POST /api/v1/knife (Create Game)"] -->|Returns 6-char code & Red Color| B["Waiting Lobby"]
+    C["POST /api/v1/knife/join (Join Game)"] -->|Pass code, gets Blue Color| D["Game Starts (Status: playing)"]
+    B --> D
+```
+
+### 2.1 Create Game (Host - Red)
+- **Endpoint:** `POST /api/v1/knife`
+- **Headers:** `x-user-id: <USER_ID>`, `devicetype: ios`, `Content-Type: application/json`
+- **Body:**
+  ```json
+  {
+    "name": "Alice",
+    "profile_image": "A7"
+  }
+  ```
+- **Response (`201 Created`):**
+  ```json
+  {
+    "success": true,
+    "message": "Game created successfully.",
+    "data": {
+      "game": {
+        "id": "e4b3c2d1-0000-4000-8000-abcdef123456",
+        "code": "KM8Y2X",
+        "host_id": "knife_user_001",
+        "status": "waiting",
+        "round": 1,
+        "level": 1,
+        "scores": { "red": 0, "blue": 0 },
+        "lives": { "red": 3, "blue": 3 },
+        "config": {
+          "lives": 3,
+          "knife_touch_deg": 13.5,
+          "apple_touch_deg": 14.0,
+          "level_pause_ms": 1000
+        }
+      },
+      "color": "red",
+      "players": [
+        { "user_id": "knife_user_001", "color": "red", "name": "Alice", "profile_image": "A7" }
+      ]
+    }
+  }
+  ```
+
+### 2.2 Join Game via Code (Guest - Blue)
+- **Endpoint:** `POST /api/v1/knife/join`
+- **Headers:** `x-user-id: <USER_ID>`, `devicetype: ios`, `Content-Type: application/json`
+- **Body:**
+  ```json
+  {
+    "code": "KM8Y2X",
+    "name": "Bob",
+    "profile_image": "B3"
+  }
+  ```
+- **Response (`200 OK`):**
+  ```json
+  {
+    "success": true,
+    "message": "Joined game successfully.",
+    "data": {
+      "game": {
+        "id": "e4b3c2d1-0000-4000-8000-abcdef123456",
+        "status": "playing",
+        "current_turn": "red",
+        "level_started_at": 1795400001000
+      },
+      "color": "blue",
+      "players": [...]
+    }
+  }
+  ```
+  > [!TIP]
+  > Calling `POST /api/v1/knife/join` again with the same `user_id` safely returns the existing seat with no error.
+
+### 2.3 Lookup Game Details
+- **By ID:** `GET /api/v1/knife/:id`
+- **By Room Code:** `GET /api/v1/knife/code/:code`
+
+---
+
+## 3. Game Rules & Hit Mathematics
 
 ```text
-================================================================================
-          KNIFE GAME MULTIPLAYER API & SOCKET.IO DEVELOPER CHEAT SHEET
-================================================================================
+               0° (Top)
+                 │
+      270° ──────┼────── 90°
+                 │
+               180°
+```
 
-1. CONNECTION & HANDSHAKE AUTH:
---------------------------------------------------------------------------------
-- Socket.IO URL:    https://<YOUR_BACKEND_URL>/v1   (or http://localhost:3000/v1)
-- Namespace:        /v1
-- Transport:        websocket
-- Handshake Headers / Params:
-    x-user-id:   "<USER_ID>"          (String, required, min 2 chars)
-    devicetype:  "ios"                (String, "ios" or "android")
-    name:        "<DISPLAY_NAME>"     (String, e.g. "Alice")
-    profileImage: "A7"                (String, avatar identifier, e.g. "A7")
+1. **Angle Space:** Decimals from `0.0°` to `359.9°` in the log's own rotational frame.
+2. **Angle Gap Formula:**
+   $$d = |a - b| \bmod 360, \quad \text{gap} = \min(d,\ 360 - d)$$
+3. **Clank Rule:**
+   - If $\text{gap} < 13.5^\circ$ to **any** knife currently stuck on the log:
+     - Result is `"clank"`.
+     - Thrower loses 1 heart (`lives - 1`).
+     - Knife does **not** stick to the log.
+     - `0` points awarded, `apples_cut: []`.
+4. **Stick Rule:**
+   - If $\text{gap} \ge 13.5^\circ$ to all stuck knives:
+     - Result is `"stick"`.
+     - Knife is added to `stuck_knives`.
+     - Every uncut apple with $\text{gap} < 14.0^\circ$ is cut (+1 point each).
+5. **Level Cleared:**
+   - Triggered when all apples on the current log are cut.
+   - `level` increments by 1.
+   - `stuck_knives` are cleared (`[]`).
+   - New apples spawn: $\min(2 + 2 \times \text{level},\ 20)$.
+   - `level_started_at = now + 1000ms`. Throws before this timestamp are rejected with `LEVEL_STARTING`.
+6. **Game Over & Winner Resolution:**
+   - Triggers when either player's hearts reach `0`.
+   - **The player with the HIGHER SCORE wins, NOT the player with hearts left!**
+   - If scores are equal: `is_draw: true`, `winner: null`.
+7. **Turns:**
+   - Turns alternate after every throw (stick or clank).
+   - **Round 1:** Red throws first.
+   - **Round 2 (Rematch):** Blue throws first.
 
+---
 
-2. REST LOBBY ENDPOINTS:
---------------------------------------------------------------------------------
-- POST /api/v1/knife
-    Headers: x-user-id, devicetype, Content-Type: application/json
-    Body:    { "name": "Alice", "profile_image": "A7" }
-    Returns: { "game": {...}, "color": "red", "players": [...] }  (Status: 201)
-    * Host is always color "red" and gets a 6-character room code.
+## 4. Client ➔ Server Socket Events (iOS Emits)
 
-- POST /api/v1/knife/join
-    Headers: x-user-id, devicetype, Content-Type: application/json
-    Body:    { "code": "KM8Y2X", "name": "Bob", "profile_image": "B3" }
-    Returns: { "game": {...}, "color": "blue", "players": [...] }  (Status: 200)
-    * Guest is always color "blue". Safe to retry with same userId.
+Always use `emitWithAck` to receive confirmation or structured error payloads.
 
-- GET /api/v1/knife/:id
-    Returns: { "game": {...}, "players": [...] }
+### 4.1 `knife:game:join`
+Join the game channel upon opening the game view or reconnecting.
+```swift
+socket.emitWithAck("knife:game:join", ["game_id": gameId]).timingOut(after: 5) { data in
+    guard let res = data.first as? [String: Any], res["ok"] as? Bool == true else { return }
+    let myColor = res["your_color"] as? String // "red" or "blue"
+    let game = res["game"] as? [String: Any]
+}
+```
 
-- GET /api/v1/knife/code/:code
-    Returns: { "game": {...}, "players": [...] }
+### 4.2 `knife:throw`
+Emitted when the player taps to launch a knife.
+```swift
+let payload: [String: Any] = [
+    "game_id": gameId,
+    "throw_number": nextExpectedThrowNumber, // Integer: 1, 2, 3...
+    "level": currentLevel,                   // Integer: 1, 2, 3...
+    "angle": landingAngle                    // Double: 0.0 to 359.9
+]
 
+socket.emitWithAck("knife:throw", payload).timingOut(after: 5) { data in
+    guard let res = data.first as? [String: Any] else { return }
+    if res["ok"] as? Bool == true {
+        let result = res["result"] as? String // "stick" or "clank"
+        let points = res["points"] as? Int
+        let applesCut = res["apples_cut"] as? [Int]
+        let nextTurn = res["next_turn"] as? String
+        let isLevelCleared = res["level_cleared"] as? Bool
+        let isGameOver = res["game_over"] as? Bool
+    } else {
+        let reason = res["reason"] as? String // e.g. "NOT_YOUR_TURN", "STALE_THROW"
+    }
+}
+```
 
-3. GAME RULES & LOG COORDINATES:
---------------------------------------------------------------------------------
-- Angle Space: 0.0° to 359.9° around the rotating log.
-- Clank Rule:
-    Distance to ANY stuck knife < 13.5° -> CLANK!
-    Thrower loses 1 heart (lives - 1). Knife does NOT stick. 0 points.
-- Stick Rule:
-    Distance to all stuck knives >= 13.5° -> STICK!
-    Knife sticks to log. Any uncut apple within < 14.0° is cut. +1 point each.
-- Level Cleared:
-    When all apples are cut: level + 1, stuck knives cleared, new apples spawned.
-    level_started_at = server_time + 1000ms. Throws before this are rejected.
-    Apples per level formula: min(2 + 2 * level, 20).
-- Game Over & Winner:
-    When either player's hearts reach 0:
-    THE PLAYER WITH THE HIGHER SCORE WINS! (Not the player with hearts left).
-    Tied score -> is_draw: true, winner: null.
-- Turns:
-    Alternate after every throw (stick or clank).
-    Round 1: Red throws first.
-    Round 2 (Rematch): Blue throws first.
+### 4.3 `knife:rematch:request`
+Ask opponent for a rematch after the match has finished.
+```swift
+socket.emitWithAck("knife:rematch:request", ["game_id": gameId]).timingOut(after: 5) { data in
+    // Server acknowledged request; opponent receives "knife:rematch:requested"
+}
+```
 
+### 4.4 `knife:rematch:respond`
+Respond to a rematch request from the opponent.
+```swift
+socket.emitWithAck("knife:rematch:respond", [
+    "game_id": gameId,
+    "accept": true // or false
+]).timingOut(after: 5) { data in
+    // If accepted: both receive "knife:game:restarted"
+}
+```
 
-4. CLIENT -> SERVER EVENTS (iOS EMITS):
---------------------------------------------------------------------------------
-Always use emitWithAck for instant responses:
+### 4.5 `knife:game:leave`
+Voluntarily leave an active match (forfeits game to opponent).
+```swift
+socket.emitWithAck("knife:game:leave", ["game_id": gameId]).timingOut(after: 5) { _ in }
+```
 
-1) "knife:game:join"
-   Payload: { "game_id": "<UUID>" }
-   Ack:     { "ok": true, "your_color": "red", "game": {...}, "players": [...] }
-   * Note: Also call this to re-join after reconnecting.
+### 4.6 `knife:time`
+Clock synchronization ping to measure network latency.
+```swift
+socket.emitWithAck("knife:time", [:]).timingOut(after: 2) { data in
+    guard let res = data.first as? [String: Any] else { return }
+    let serverTime = res["server_time"] as? Double
+}
+```
 
-2) "knife:throw"
-   Payload: {
-     "game_id": "<UUID>",
-     "throw_number": 1,    // Next expected throw number (1, 2, 3...)
-     "level": 1,           // Current level number
-     "angle": 45.2         // Landing angle on log (0 to 359.9)
-   }
-   Success Ack: {
-     "ok": true,
-     "game_id": "<UUID>",
-     "user_id": "<USER_ID>",
-     "color": "red",
-     "throw_number": 1,
-     "angle": 45.2,
-     "result": "stick",    // "stick" or "clank"
-     "apples_cut": [0],    // Array of apple indices cut
-     "points": 1,          // Points earned this throw
-     "scores": { "red": 1, "blue": 0 },
-     "lives": { "red": 3, "blue": 3 },
-     "next_turn": "blue",  // Whose turn is next (null if game over)
-     "next_throw_number": 2,
-     "level_cleared": false,
-     "next_level": null,   // { level, level_started_at, apples } if cleared
-     "game_over": false,
-     "server_time": 1795400010000
-   }
-   Error Ack: {
-     "ok": false,
-     "code": "THROW_FAILED",
-     "reason": "NOT_YOUR_TURN" | "STALE_THROW" | "LEVEL_STARTING" | "INVALID_ANGLE"
-   }
+---
 
-3) "knife:rematch:request"
-   Payload: { "game_id": "<UUID>" }
-   Ack:     { "ok": true }
-   * Triggers "knife:rematch:requested" on opponent's screen.
+## 5. Server ➔ Client Socket Events (iOS Listens to)
 
-4) "knife:rematch:respond"
-   Payload: { "game_id": "<UUID>", "accept": true } // or false
-   Ack:     { "ok": true, "game": {...}, "players": [...] } (if accepted)
-            { "ok": true, "accepted": false } (if declined)
+Register these in your ViewController / ViewModel:
 
-5) "knife:game:leave"
-   Payload: { "game_id": "<UUID>" }
-   Ack:     { "ok": true, "game_abandoned": true }
+### 5.1 `knife:thrown`
+Broadcast to both players whenever a knife is thrown.
+```swift
+socket.on("knife:thrown") { data, _ in
+    guard let res = data.first as? [String: Any] else { return }
+    let throwerColor = res["color"] as? String
+    let angle = res["angle"] as? Double
+    let result = res["result"] as? String // "stick" or "clank"
+    let scores = res["scores"] as? [String: Int]
+    let lives = res["lives"] as? [String: Int]
+    let nextTurn = res["next_turn"] as? String
+    
+    // 1. Animate knife landing at 'angle'
+    // 2. If 'clank': trigger bounce animation and shake screen
+    // 3. If 'stick': stick knife to log and animate cut apples
+    // 4. Update scoreboard and hearts
+}
+```
 
-6) "knife:time"
-   Payload: {}
-   Ack:     { "ok": true, "server_time": 1795400005000 }
+### 5.2 `knife:game:over`
+Broadcast when either player's lives reach `0` or on forfeit.
+```swift
+socket.on("knife:game:over") { data, _ in
+    guard let res = data.first as? [String: Any] else { return }
+    let winner = res["winner"] as? String       // "red", "blue", or nil (Draw)
+    let reason = res["reason"] as? String       // "SCORE", "OPPONENT_LEFT", "OPPONENT_DISCONNECTED"
+    let scores = res["scores"] as? [String: Int]
+    let isDraw = res["is_draw"] as? Bool ?? false
+    
+    // Display Game Over Modal with Winner Announcement and Rematch button
+}
+```
 
+### 5.3 `knife:rematch:requested`
+Received when the opponent asks for a rematch.
+```swift
+socket.on("knife:rematch:requested") { data, _ in
+    // Display alert dialog: "Opponent wants a rematch! Accept?" [Accept] [Decline]
+    // Call socket.emitWithAck("knife:rematch:respond", ["game_id": id, "accept": true/false])
+}
+```
 
-5. SERVER -> CLIENT EVENTS (iOS LISTENS TO):
---------------------------------------------------------------------------------
-1) "knife:player:joined"
-   Sent to: Opponent
-   Payload: { "game": {...}, "players": [...] }
-   Action:  Opponent has entered or reconnected.
+### 5.4 `knife:rematch:declined`
+Received by the requester if opponent declines.
+```swift
+socket.on("knife:rematch:declined") { _, _ in
+    // Show toast: "Rematch was declined."
+}
+```
 
-2) "knife:game:started"
-   Sent to: Both players
-   Payload: { "game": {...}, "players": [...] }
-   Action:  Match starts. Start log spin at game.level_started_at.
+### 5.5 `knife:game:restarted`
+Broadcast to both players when a rematch starts.
+```swift
+socket.on("knife:game:restarted") { data, _ in
+    guard let res = data.first as? [String: Any],
+          let game = res["game"] as? [String: Any] else { return }
+    
+    // 1. Reset board to Level 1
+    // 2. Clear stuck knives
+    // 3. Scores = 0, Hearts = 3
+    // 4. Note: Blue throws first in Round 2!
+}
+```
 
-3) "knife:thrown"
-   Sent to: Opponent & other devices
-   Payload: Identical to the throw result object above.
-   Action:  Animate knife throw, display clank or stick, update scores & hearts.
+### 5.6 `knife:player:disconnected`
+Broadcast when opponent loses internet connection or backgrounds the app.
+```swift
+socket.on("knife:player:disconnected") { data, _ in
+    // Display banner: "Opponent disconnected. 60s reconnection grace period..."
+}
+```
 
-4) "knife:game:over"
-   Sent to: Both players
-   Payload: {
-     "status": "finished",
-     "winner": "red",          // "red", "blue", or null (Draw)
-     "winner_user_id": "<UUID>",
-     "is_draw": false,
-     "reason": "SCORE" | "OPPONENT_LEFT" | "OPPONENT_DISCONNECTED",
-     "scores": { "red": 8, "blue": 4 },
-     "lives": { "red": 2, "blue": 0 },
-     "level": 3
-   }
-   Action:  Display Game Over dialog and Rematch button.
+### 5.7 `knife:player:joined`
+Broadcast when opponent enters the room or reconnects after dropping.
+```swift
+socket.on("knife:player:joined") { data, _ in
+    // Dismiss reconnection banner and resume active turn
+}
+```
 
-5) "knife:rematch:requested"
-   Sent to: Opponent
-   Payload: { "user_id": "<REQUESTER_ID>" }
-   Action:  Show alert: "Opponent wants a rematch! Accept? [Yes] [No]".
-            Emit "knife:rematch:respond" with accept: true or false.
+### 5.8 `knife:player:left`
+Broadcast when opponent voluntarily exits or times out.
+```swift
+socket.on("knife:player:left") { data, _ in
+    // Opponent left; game ends by forfeit
+}
+```
 
-6) "knife:rematch:declined"
-   Sent to: Requester
-   Payload: { "user_id": "..." }
-   Action:  Show toast: "Rematch was declined."
+---
 
-7) "knife:game:restarted"
-   Sent to: Both players
-   Payload: { "game": {...}, "players": [...] }
-   Action:  Reset board to Level 1, scores = 0, lives = 3.
-            Note: Blue throws first in Round 2!
+## 6. Error Codes & UI Recommendations
 
-8) "knife:player:disconnected"
-   Sent to: Opponent
-   Payload: { "user_id": "...", "timeout_ms": 60000 }
-   Action:  Show banner: "Opponent disconnected. 60s to reconnect...".
+| Error `code` | Error `reason` | Cause | Recommended UI Action |
+| :--- | :--- | :--- | :--- |
+| `THROW_FAILED` | `NOT_YOUR_TURN` | Player threw on opponent's turn | Subtle haptic warning, ignore tap |
+| `THROW_FAILED` | `STALE_THROW` | Double tap or packet mismatch | Re-sync `throw_number` from last state |
+| `THROW_FAILED` | `LEVEL_STARTING` | Threw during 1,000ms level break | Wait for `level_started_at` log spin |
+| `THROW_FAILED` | `INVALID_ANGLE` | Angle is NaN or not in 0..360 | Check local SpriteKit touch angle math |
+| `THROW_FAILED` | `GAME_NOT_ACTIVE` | Threw before start or after end | Ignore throw |
+| `REMATCH_FAILED` | `GAME_NOT_FINISHED` | Tap rematch mid-match | Disable rematch button until game over |
+| `REMATCH_FAILED` | `OPPONENT_LEFT` | Opponent already exited room | Disable rematch, show "Return to Lobby" |
+| `NOT_IN_GAME` | `NOT_IN_GAME` | Socket didn't join room | Re-emit `knife:game:join` |
 
-9) "knife:player:left"
-   Sent to: Opponent
-   Payload: { "user_id": "..." }
-   Action:  Opponent exited. Game awarded by forfeit.
+---
 
+## 7. Swift Implementation Template
 
-6. ERROR CODES & REASONS:
---------------------------------------------------------------------------------
-| code             | reason              | Description                           |
-| :--------------- | :------------------ | :------------------------------------ |
-| `THROW_FAILED`   | `NOT_YOUR_TURN`     | Threw when current_turn was opponent   |
-| `THROW_FAILED`   | `STALE_THROW`       | throw_number or level mismatch         |
-| `THROW_FAILED`   | `LEVEL_STARTING`    | Threw before level_started_at pause    |
-| `THROW_FAILED`   | `INVALID_ANGLE`     | Angle outside 0..360 or not a number   |
-| `THROW_FAILED`   | `GAME_NOT_ACTIVE`   | Game not in playing state              |
-| `REMATCH_FAILED` | `GAME_NOT_FINISHED` | Asked rematch while still playing      |
-| `REMATCH_FAILED` | `OPPONENT_LEFT`     | Asked rematch after opponent left      |
-| `NOT_IN_GAME`    | `NOT_IN_GAME`       | Did not join game first                |
-================================================================================
+```swift
+import Foundation
+import SocketIO
+
+final class KnifeGameSocketManager {
+    static let shared = KnifeGameSocketManager()
+    
+    private var manager: SocketManager?
+    private var socket: SocketIOClient?
+    
+    func connect(userId: String, name: String, avatar: String) {
+        let url = URL(string: "https://drawing-widget-backend.onrender.com/v1")!
+        manager = SocketManager(socketURL: url, config: [
+            .log(false),
+            .forceWebsockets(true),
+            .connectParams([
+                "userId": userId,
+                "devicetype": "ios",
+                "name": name,
+                "profileImage": avatar
+            ])
+        ])
+        socket = manager?.defaultSocket
+        setupListeners()
+        socket?.connect()
+    }
+    
+    private func setupListeners() {
+        guard let socket = socket else { return }
+        
+        socket.on("knife:thrown") { data, _ in
+            guard let dict = data.first as? [String: Any] else { return }
+            NotificationCenter.default.post(name: .onKnifeThrown, object: dict)
+        }
+        
+        socket.on("knife:game:over") { data, _ in
+            guard let dict = data.first as? [String: Any] else { return }
+            NotificationCenter.default.post(name: .onKnifeGameOver, object: dict)
+        }
+        
+        socket.on("knife:rematch:requested") { data, _ in
+            guard let dict = data.first as? [String: Any] else { return }
+            NotificationCenter.default.post(name: .onKnifeRematchRequested, object: dict)
+        }
+        
+        socket.on("knife:game:restarted") { data, _ in
+            guard let dict = data.first as? [String: Any] else { return }
+            NotificationCenter.default.post(name: .onKnifeGameRestarted, object: dict)
+        }
+    }
+    
+    func sendThrow(gameId: String, throwNumber: Int, level: Int, angle: Double, completion: @escaping (Bool, [String: Any]?) -> Void) {
+        let payload: [String: Any] = [
+            "game_id": gameId,
+            "throw_number": throwNumber,
+            "level": level,
+            "angle": angle
+        ]
+        socket?.emitWithAck("knife:throw", payload).timingOut(after: 4) { data in
+            guard let res = data.first as? [String: Any] else {
+                completion(false, nil)
+                return
+            }
+            let isOk = res["ok"] as? Bool ?? false
+            completion(isOk, res)
+        }
+    }
+}
 ```
