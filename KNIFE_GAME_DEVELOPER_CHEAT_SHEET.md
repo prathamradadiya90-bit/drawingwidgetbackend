@@ -191,7 +191,7 @@ let payload: [String: Any] = [
     "game_id": gameId,
     "throw_number": nextExpectedThrowNumber, // Integer: 1, 2, 3...
     "level": currentLevel,                   // Integer: 1, 2, 3...
-    "angle": landingAngle                    // Double: 0.0 to 359.9
+    "angle": landingAngle                    // Double: 0.0 to 359.9 (MUST be numeric Double; string "45" is rejected with INVALID_ANGLE)
 ]
 
 socket.emitWithAck("knife:throw", payload).timingOut(after: 5) { data in
@@ -204,27 +204,54 @@ socket.emitWithAck("knife:throw", payload).timingOut(after: 5) { data in
         let isLevelCleared = res["level_cleared"] as? Bool
         let isGameOver = res["game_over"] as? Bool
     } else {
-        let reason = res["reason"] as? String // e.g. "NOT_YOUR_TURN", "STALE_THROW"
+        // Error codes:
+        // - "STALE_THROW": Duplicate/retried throw number or level mismatch (checked BEFORE turn)
+        // - "INVALID_ANGLE": Non-numeric or out-of-range angle
+        // - "NOT_YOUR_TURN": Throwing when it is not your turn
+        // - "LEVEL_STARTING": Throwing during the 1,000ms level break
+        let reason = res["reason"] as? String
     }
 }
 ```
 
 ### 4.3 `knife:rematch:request`
 Ask opponent for a rematch after the match has finished.
+> **Note:** Duplicate requests from the same user acknowledge `{ ok: true }` without spamming the opponent. Mutual requests by both players automatically trigger the match restart.
 ```swift
 socket.emitWithAck("knife:rematch:request", ["game_id": gameId]).timingOut(after: 5) { data in
-    // Server acknowledged request; opponent receives "knife:rematch:requested"
+    guard let res = data.first as? [String: Any] else { return }
+    if res["ok"] as? Bool == true {
+        // Server acknowledged request; opponent receives "knife:rematch:requested"
+    } else {
+        // reason == "OPPONENT_LEFT" (opponent exited room or match abandoned)
+        let reason = res["reason"] as? String
+    }
 }
 ```
 
 ### 4.4 `knife:rematch:respond`
 Respond to a rematch request from the opponent.
+> **Note:** Requires a pending request from the opponent. You cannot answer your own rematch request, and you cannot accept after a decline.
 ```swift
 socket.emitWithAck("knife:rematch:respond", [
     "game_id": gameId,
     "accept": true // or false
 ]).timingOut(after: 5) { data in
-    // If accepted: both receive "knife:game:restarted"
+    guard let res = data.first as? [String: Any] else { return }
+    if res["ok"] as? Bool == true {
+        if let accepted = res["accepted"] as? Bool, !accepted {
+            // Rematch was declined
+        } else {
+            // Rematch accepted! (BOTH players receive "knife:game:restarted")
+            let game = res["game"] as? [String: Any]
+        }
+    } else {
+        // Error codes:
+        // - "NO_REMATCH_REQUEST": No request open, or already declined
+        // - "CANNOT_ACCEPT_OWN_REMATCH": Tried answering own request
+        // - "OPPONENT_LEFT": Opponent left room
+        let reason = res["reason"] as? String
+    }
 }
 ```
 
@@ -322,14 +349,29 @@ socket.on("knife:player:disconnected") { data, _ in
 ```
 
 ### 5.7 `knife:player:joined`
-Broadcast when opponent enters the room or reconnects after dropping.
+Broadcast to the room when the opponent joins (fires immediately when the guest joins via REST `POST /api/v1/knife/join` or connects via socket, notifying the host straight away without polling).
 ```swift
 socket.on("knife:player:joined") { data, _ in
-    // Dismiss reconnection banner and resume active turn
+    guard let res = data.first as? [String: Any],
+          let game = res["game"] as? [String: Any],
+          let players = res["players"] as? [[String: Any]] else { return }
+    
+    // Host UI: Opponent entered room / joined over REST; update lobby screen
 }
 ```
 
-### 5.8 `knife:player:left`
+### 5.8 `knife:game:started`
+Broadcast to **both players** strictly **once per round** when both players are connected and ready.
+```swift
+socket.on("knife:game:started") { data, _ in
+    guard let res = data.first as? [String: Any],
+          let game = res["game"] as? [String: Any] else { return }
+    
+    // Start initial countdown & log rotation animation
+}
+```
+
+### 5.9 `knife:player:left`
 Broadcast when opponent voluntarily exits or times out.
 ```swift
 socket.on("knife:player:left") { data, _ in
@@ -344,13 +386,15 @@ socket.on("knife:player:left") { data, _ in
 | Error `code` | Error `reason` | Cause | Recommended UI Action |
 | :--- | :--- | :--- | :--- |
 | `THROW_FAILED` | `NOT_YOUR_TURN` | Player threw on opponent's turn | Subtle haptic warning, ignore tap |
-| `THROW_FAILED` | `STALE_THROW` | Double tap or packet mismatch | Re-sync `throw_number` from last state |
+| `THROW_FAILED` | `STALE_THROW` | Duplicate/re-sent throw number or level mismatch | Re-sync `throw_number` from last state |
 | `THROW_FAILED` | `LEVEL_STARTING` | Threw during 1,000ms level break | Wait for `level_started_at` log spin |
-| `THROW_FAILED` | `INVALID_ANGLE` | Angle is NaN or not in 0..360 | Check local SpriteKit touch angle math |
+| `THROW_FAILED` | `INVALID_ANGLE` | Angle is non-numeric, NaN, or outside 0..<360 | Pass strict numeric Double |
 | `THROW_FAILED` | `GAME_NOT_ACTIVE` | Threw before start or after end | Ignore throw |
+| `REMATCH_FAILED` | `NO_REMATCH_REQUEST` | Called rematch respond when no request was open (or after decline) | Keep Rematch button active to request rematch |
+| `REMATCH_FAILED` | `CANNOT_ACCEPT_OWN_REMATCH` | Requester attempted to accept their own request | Wait for opponent to respond |
 | `REMATCH_FAILED` | `GAME_NOT_FINISHED` | Tap rematch mid-match | Disable rematch button until game over |
-| `REMATCH_FAILED` | `OPPONENT_LEFT` | Opponent already exited room | Disable rematch, show "Return to Lobby" |
-| `NOT_IN_GAME` | `NOT_IN_GAME` | Socket didn't join room | Re-emit `knife:game:join` |
+| `REMATCH_FAILED` | `OPPONENT_LEFT` | Opponent already exited room or timed out | Disable rematch, show "Return to Lobby" |
+| `NOT_IN_GAME` | `NOT_IN_GAME` | Player has left or was never in the game | Return to Lobby screen |
 
 ---
 
@@ -386,6 +430,16 @@ final class KnifeGameSocketManager {
     private func setupListeners() {
         guard let socket = socket else { return }
         
+        socket.on("knife:player:joined") { data, _ in
+            guard let dict = data.first as? [String: Any] else { return }
+            NotificationCenter.default.post(name: .onKnifePlayerJoined, object: dict)
+        }
+        
+        socket.on("knife:game:started") { data, _ in
+            guard let dict = data.first as? [String: Any] else { return }
+            NotificationCenter.default.post(name: .onKnifeGameStarted, object: dict)
+        }
+        
         socket.on("knife:thrown") { data, _ in
             guard let dict = data.first as? [String: Any] else { return }
             NotificationCenter.default.post(name: .onKnifeThrown, object: dict)
@@ -401,11 +455,45 @@ final class KnifeGameSocketManager {
             NotificationCenter.default.post(name: .onKnifeRematchRequested, object: dict)
         }
         
+        socket.on("knife:rematch:declined") { data, _ in
+            guard let dict = data.first as? [String: Any] else { return }
+            NotificationCenter.default.post(name: .onKnifeRematchDeclined, object: dict)
+        }
+        
         socket.on("knife:game:restarted") { data, _ in
             guard let dict = data.first as? [String: Any] else { return }
             NotificationCenter.default.post(name: .onKnifeGameRestarted, object: dict)
         }
+        
+        socket.on("knife:player:disconnected") { data, _ in
+            guard let dict = data.first as? [String: Any] else { return }
+            NotificationCenter.default.post(name: .onKnifePlayerDisconnected, object: dict)
+        }
+        
+        socket.on("knife:player:left") { data, _ in
+            guard let dict = data.first as? [String: Any] else { return }
+            NotificationCenter.default.post(name: .onKnifePlayerLeft, object: dict)
+        }
     }
+    
+    func sendThrow(gameId: String, throwNumber: Int, level: Int, angle: Double, completion: @escaping (Bool, [String: Any]?) -> Void) {
+        let payload: [String: Any] = [
+            "game_id": gameId,
+            "throw_number": throwNumber,
+            "level": level,
+            "angle": angle
+        ]
+        socket?.emitWithAck("knife:throw", payload).timingOut(after: 4) { data in
+            guard let res = data.first as? [String: Any] else {
+                completion(false, nil)
+                return
+            }
+            let isOk = res["ok"] as? Bool ?? false
+            completion(isOk, res)
+        }
+    }
+}
+```
     
     func sendThrow(gameId: String, throwNumber: Int, level: Int, angle: Double, completion: @escaping (Bool, [String: Any]?) -> Void) {
         let payload: [String: Any] = [
