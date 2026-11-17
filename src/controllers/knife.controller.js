@@ -1,5 +1,7 @@
 import { knifeGameService } from '../services/knife.service.js';
 import { successResponse, errorResponse } from '../helpers/response.helper.js';
+import { SocketEvents } from '../helpers/constants.js';
+import { broadcastKnife } from '../sockets/knife.events.js';
 
 const pickProfileImage = ({ profile_image, profileImage, avatar_url, avatarUrl, avatar }) =>
   profile_image || profileImage || avatar_url || avatarUrl || avatar || null;
@@ -39,6 +41,15 @@ export const knifeController = {
       userId: req.userId,
       deviceType: req.deviceType,
     });
+
+    const io = req.app?.get('io');
+    if (io) {
+      broadcastKnife(io, result.game.id, SocketEvents.KNIFE_PLAYER_JOINED, {
+        game: result.game,
+        players: result.players,
+      });
+    }
+
     return successResponse(res, result, 'Joined game successfully.');
   }),
 

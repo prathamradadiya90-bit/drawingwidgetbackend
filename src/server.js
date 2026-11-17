@@ -10,6 +10,7 @@ const server = http.createServer(app);
 
 // Initialize Socket.IO for real-time multiplayer drawing
 const io = initializeSocket(server);
+app.set('io', io);
 
 // Start server
 server.listen(config.port, () => {

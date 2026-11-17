@@ -9,17 +9,26 @@ const { GameStatus, EndReason } = KnifeGame;
 // Forfeit timers for players who dropped mid-game: key `${gameId}:${userId}`
 const forfeitTimers = new Map();
 
+// Pending rematch requests: key `${gameId}` -> { requesterUserId, requestedAt }
+const pendingRematches = new Map();
+
+// Rounds where knife:game:started has already been emitted: key `${gameId}:${round}`
+const startedRounds = new Set();
+
 const gameChannel = (gameId) => `knife:${gameId}`;
 
 // Clients connect on "/" or "/v1", and opponents may be on different namespaces.
 const namespacesOf = (io) => [io.of('/'), io.of('/v1')];
 
-function broadcast(io, gameId, event, payload, exceptSocketId) {
+export function broadcastKnife(io, gameId, event, payload, exceptSocketId) {
+  if (!io) return;
   for (const nsp of namespacesOf(io)) {
     const target = nsp.to(gameChannel(gameId));
     (exceptSocketId ? target.except(exceptSocketId) : target).emit(event, payload);
   }
 }
+
+const broadcast = broadcastKnife;
 
 async function isUserConnected(io, gameId, userId, exceptSocketId) {
   const sockets = await Promise.all(
@@ -43,7 +52,7 @@ function announceGameOver(io, gameId, winner, winnerUserId, isDraw, reason, scor
     winner,
     winner_user_id: winnerUserId,
     is_draw: isDraw,
-    reason,
+    reason: reason || 'SCORE',
     scores,
     lives,
     level,
@@ -79,6 +88,7 @@ function armForfeit(io, gameId, userId) {
 
   const timer = setTimeout(async () => {
     forfeitTimers.delete(key);
+    pendingRematches.delete(gameId);
     try {
       const result = await knifeGameService.leaveGame({
         gameId,
@@ -167,13 +177,17 @@ export function registerKnifeEvents(socket, io) {
       socket.id
     );
 
-    // If both players have joined and game is playing, inform both with knife:game:started
+    // If both players have joined and game is playing, inform both with knife:game:started (only once per round)
     if (game.status === GameStatus.PLAYING) {
       const opponent = players.find((p) => p.user_id !== userId);
       if (opponent) {
         const opponentOnline = await isUserConnected(io, gameId, opponent.user_id);
         if (opponentOnline) {
-          broadcast(io, gameId, SocketEvents.KNIFE_GAME_STARTED, { game, players });
+          const roundKey = `${gameId}:${game.round}`;
+          if (!startedRounds.has(roundKey)) {
+            startedRounds.add(roundKey);
+            broadcast(io, gameId, SocketEvents.KNIFE_GAME_STARTED, { game, players });
+          }
         } else {
           armForfeit(io, gameId, opponent.user_id);
         }
@@ -191,7 +205,7 @@ export function registerKnifeEvents(socket, io) {
       userId,
       throwNumber,
       level,
-      angle: Number(angle),
+      angle,
     });
 
     if (typeof ack === 'function') {
@@ -209,7 +223,7 @@ export function registerKnifeEvents(socket, io) {
         result.winner,
         result.winnerUserId,
         result.isDraw,
-        result.reason,
+        result.reason || result.endReason || 'SCORE',
         result.game.scores,
         result.game.lives,
         result.game.level
@@ -221,6 +235,44 @@ export function registerKnifeEvents(socket, io) {
   on(SocketEvents.KNIFE_REMATCH_REQUEST, ErrorCodes.REMATCH_FAILED, async (payload, ack) => {
     const gameId = requireJoinedGame(payload.game_id);
     const { opponentUserId } = await knifeGameService.requestRematch({ gameId, userId });
+
+    const existing = pendingRematches.get(gameId);
+    if (existing) {
+      if (existing.requesterUserId === userId) {
+        // Duplicate request from the same user: acknowledge, but do not re-broadcast
+        if (typeof ack === 'function') ack({ ok: true });
+        return;
+      }
+
+      // Both players have requested a rematch! Treat as mutual consent -> trigger restart
+      pendingRematches.delete(gameId);
+      const result = await knifeGameService.respondRematch({
+        gameId,
+        userId,
+        accept: true,
+      });
+
+      const roundKey = `${gameId}:${result.game.round}`;
+      startedRounds.add(roundKey);
+
+      if (typeof ack === 'function') {
+        ack({ ok: true, game: result.game, players: result.players });
+      }
+
+      broadcast(
+        io,
+        gameId,
+        SocketEvents.KNIFE_GAME_RESTARTED,
+        { game: result.game, players: result.players }
+      );
+      return;
+    }
+
+    // Record pending rematch request
+    pendingRematches.set(gameId, {
+      requesterUserId: userId,
+      requestedAt: Date.now(),
+    });
 
     if (typeof ack === 'function') {
       ack({ ok: true });
@@ -240,6 +292,26 @@ export function registerKnifeEvents(socket, io) {
     const gameId = requireJoinedGame(payload.game_id);
     const { accept } = payload;
 
+    const pending = pendingRematches.get(gameId);
+    if (!pending) {
+      const error = new Error('No rematch request pending');
+      error.statusCode = 409;
+      error.code = ErrorCodes.REMATCH_FAILED;
+      error.reason = 'NO_REMATCH_REQUEST';
+      throw error;
+    }
+
+    if (pending.requesterUserId === userId) {
+      const error = new Error('Cannot respond to your own rematch request');
+      error.statusCode = 409;
+      error.code = ErrorCodes.REMATCH_FAILED;
+      error.reason = 'CANNOT_ACCEPT_OWN_REMATCH';
+      throw error;
+    }
+
+    // Clear pending request once responded to
+    pendingRematches.delete(gameId);
+
     const result = await knifeGameService.respondRematch({
       gameId,
       userId,
@@ -258,16 +330,19 @@ export function registerKnifeEvents(socket, io) {
       return;
     }
 
+    const roundKey = `${gameId}:${result.game.round}`;
+    startedRounds.add(roundKey);
+
     if (typeof ack === 'function') {
       ack({ ok: true, game: result.game, players: result.players });
     }
 
+    // Broadcast to BOTH players (no exceptSocketId)
     broadcast(
       io,
       gameId,
       SocketEvents.KNIFE_GAME_RESTARTED,
-      { game: result.game, players: result.players },
-      socket.id
+      { game: result.game, players: result.players }
     );
   });
 
@@ -275,6 +350,7 @@ export function registerKnifeEvents(socket, io) {
   on(SocketEvents.KNIFE_GAME_LEAVE, null, async (payload, ack) => {
     const gameId = requireJoinedGame(payload.game_id);
     cancelForfeit(gameId, userId);
+    pendingRematches.delete(gameId);
     const result = await knifeGameService.leaveGame({ gameId, userId });
 
     socket.leave(gameChannel(gameId));

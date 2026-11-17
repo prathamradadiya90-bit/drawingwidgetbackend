@@ -95,6 +95,7 @@ export function serializePlayer(row) {
     color: row.color,
     name: row.name,
     profile_image: row.profile_image,
+    left_at: row.left_at,
   };
 }
 
@@ -277,11 +278,15 @@ export const knifeGameService = {
     return { game: serializeGame(rows[0]), players: await listPlayers(pool, rows[0].id) };
   },
 
-  /** Returns caller's seat and game state for socket join. Rejects non-players. */
+  /** Returns caller's seat and game state for socket join. Rejects non-players and players who left. */
   async getSeat({ gameId, userId }) {
     const normalizedUserId = String(userId).trim().toLowerCase();
     const { game, players } = await this.getGame(gameId);
-    const seat = players.find((p) => p.user_id === normalizedUserId);
+    const seatRes = await pool.query(
+      'SELECT * FROM knife_players WHERE game_id = $1 AND user_id = $2 AND left_at IS NULL',
+      [gameId, normalizedUserId]
+    );
+    const seat = seatRes.rows[0];
     if (!seat) {
       throw gameError(ErrorCodes.NOT_IN_GAME, 'You are not a player in this game', 403, 'NOT_IN_GAME');
     }
@@ -296,7 +301,7 @@ export const knifeGameService = {
    * Game over -> either lives <= 0, higher score wins.
    */
   async throwKnife({ gameId, userId, throwNumber, level, angle }) {
-    if (typeof angle !== 'number' || Number.isNaN(angle) || angle < 0 || angle >= 360) {
+    if (typeof angle !== 'number' || !Number.isFinite(angle) || angle < 0 || angle >= 360) {
       throw gameError(
         ErrorCodes.INVALID_ANGLE,
         'Angle must be a number between 0 and 360',
@@ -318,16 +323,16 @@ export const knifeGameService = {
         throw gameError(ErrorCodes.GAME_NOT_ACTIVE, 'This game is not in progress', 409, 'THROW_FAILED');
       }
 
-      if (gameRow.current_turn !== player.color) {
-        throw gameError(ErrorCodes.NOT_YOUR_TURN, 'It is not your turn', 409, 'THROW_FAILED');
-      }
-
       if (level !== gameRow.level) {
         throw gameError(ErrorCodes.STALE_THROW, 'Level mismatch', 409, 'THROW_FAILED');
       }
 
       if (throwNumber !== gameRow.throw_number + 1) {
         throw gameError(ErrorCodes.STALE_THROW, 'Stale throw number', 409, 'THROW_FAILED');
+      }
+
+      if (gameRow.current_turn !== player.color) {
+        throw gameError(ErrorCodes.NOT_YOUR_TURN, 'It is not your turn', 409, 'THROW_FAILED');
       }
 
       const now = Date.now();
@@ -522,6 +527,7 @@ export const knifeGameService = {
         winner,
         winnerUserId,
         isDraw,
+        reason: endReason,
         endReason,
         isGameOver,
       };
@@ -536,10 +542,10 @@ export const knifeGameService = {
       const game = await lockGame(client, gameId);
       await requireActivePlayer(client, gameId, normalizedUserId);
 
-      if (game.status !== GameStatus.FINISHED) {
+      if (game.status === GameStatus.ABANDONED) {
         throw gameError(
-          ErrorCodes.GAME_NOT_FINISHED,
-          'Rematch asked while the game is still playing',
+          ErrorCodes.OPPONENT_LEFT,
+          'Your opponent has left this game',
           409,
           'REMATCH_FAILED'
         );
@@ -558,6 +564,15 @@ export const knifeGameService = {
         );
       }
 
+      if (game.status !== GameStatus.FINISHED) {
+        throw gameError(
+          ErrorCodes.GAME_NOT_FINISHED,
+          'Rematch asked while the game is still playing',
+          409,
+          'REMATCH_FAILED'
+        );
+      }
+
       return { ok: true, opponentUserId: rows[0].user_id };
     });
   },
@@ -570,10 +585,10 @@ export const knifeGameService = {
       const game = await lockGame(client, gameId);
       await requireActivePlayer(client, gameId, normalizedUserId);
 
-      if (game.status !== GameStatus.FINISHED) {
+      if (game.status === GameStatus.ABANDONED) {
         throw gameError(
-          ErrorCodes.GAME_NOT_FINISHED,
-          'Rematch asked while the game is still playing',
+          ErrorCodes.OPPONENT_LEFT,
+          'Your opponent has left this game',
           409,
           'REMATCH_FAILED'
         );
@@ -592,6 +607,15 @@ export const knifeGameService = {
         );
       }
       const opponentUserId = opponentRes.rows[0].user_id;
+
+      if (game.status !== GameStatus.FINISHED) {
+        throw gameError(
+          ErrorCodes.GAME_NOT_FINISHED,
+          'Rematch asked while the game is still playing',
+          409,
+          'REMATCH_FAILED'
+        );
+      }
 
       if (!accept) {
         return { accepted: false, opponentUserId };
@@ -700,7 +724,7 @@ export const knifeGameService = {
           GameStatus.ABANDONED,
           isLive ? opponentColor : null,
           isLive ? opponentUserId : null,
-          isLive ? reason : null,
+          reason,
         ]
       );
 
