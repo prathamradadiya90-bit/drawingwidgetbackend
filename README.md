@@ -5,6 +5,11 @@ Production-ready Node.js (ES Modules) backend API with **Multiplayer Rooms** and
 ---
 
 ## Features
+- **Knife Game (two-player)**:
+  - Server-authoritative knife throwing game (`red` vs `blue`).
+  - Landing angle evaluation (`0°–360°`), clank detection (`< 13.5°` loses 1 heart), and apple cutting (`< 14°`, +1 point).
+  - Progressive log clearing (`min(2 + 2 * level, 20)` apples), level pause timing, and score-based winner resolution on 0 hearts.
+  - Interactive rematch request/response handshake with alternating starting colors, and 60-second reconnect forfeit timer.
 - **Tic Tac Toe (two-player)**:
   - Server-authoritative turns, win and draw detection over Socket.IO.
   - Joined with a 6-character code; iOS and Android players can play each other.
@@ -110,6 +115,7 @@ npm test
 ```
 
 ### 6. Postman Testing Guides
+- 🔪 **Knife Game Testing Guide**: [KNIFE_GAME_POSTMAN_TESTING_GUIDE.md](KNIFE_GAME_POSTMAN_TESTING_GUIDE.md) (Dedicated Postman collection: `knife_postman_collection.json`)
 - 🎮 **Tic-Tac-Toe Testing Guide**: [TICTACTOE_POSTMAN_TESTING_GUIDE.md](TICTACTOE_POSTMAN_TESTING_GUIDE.md) (Dedicated Postman collection: `tictactoe_postman_collection.json`)
 - 🎨 **Multiplayer Drawing Rooms Testing Guide**: [POSTMAN_TESTING_GUIDE.md](POSTMAN_TESTING_GUIDE.md) (Full backend collection: `postman_collection.json`)
 
@@ -253,3 +259,42 @@ Failed acks are `{ ok: false, code, reason, error, event }`.
 | `RESTART_FAILED` | `GAME_NOT_FINISHED`, `OPPONENT_LEFT`, `NOT_IN_GAME` | Hide the rematch option |
 | `GAME_NOT_FOUND` | `GAME_NOT_FOUND` | Navigate back to lobby |
 | `NOT_IN_GAME` | `NOT_IN_GAME` | Prompt user to enter the game code again |
+
+---
+
+## Knife Game (Multiplayer)
+
+### Endpoints
+
+| Method | Endpoint | Body / Notes |
+|---|---|---|
+| `POST` | `/api/v1/knife` | `{ name?, profile_image? }`, returns `{ game, color: "red", players }` |
+| `POST` | `/api/v1/knife/join` | `{ code, name?, profile_image? }`, returns `{ game, color: "blue", players }`. Safe to retry |
+| `GET` | `/api/v1/knife/:id` | Returns `{ game, players }` |
+| `GET` | `/api/v1/knife/code/:code` | Returns `{ game, players }` |
+
+### Client -> Server Socket Events (`/v1` namespace)
+
+| Event | Payload | Ack response |
+|---|---|---|
+| `knife:game:join` | `{ game_id }` | `{ ok, game, players, your_color }` |
+| `knife:throw` | `{ game_id, throw_number, level, angle }` | `{ ok, ...throwResult }` |
+| `knife:rematch:request` | `{ game_id }` | `{ ok: true }` |
+| `knife:rematch:respond` | `{ game_id, accept: true\|false }` | `{ ok: true, game?, players? }` |
+| `knife:game:leave` | `{ game_id }` | `{ ok: true, game_abandoned }` |
+| `knife:time` | `{}` | `{ ok: true, server_time }` |
+
+### Server -> Client Socket Events
+
+| Event | Payload | Sent to |
+|---|---|---|
+| `knife:player:joined` | `{ game, players }` | Opponent / Other player |
+| `knife:game:started` | `{ game, players }` | Both players upon match start |
+| `knife:thrown` | Throw result dictionary (scores, lives, apples_cut, points, clank/stick) | Opponent |
+| `knife:game:over` | `{ status, winner, winner_user_id, is_draw, reason, scores, lives, level }` | Both players |
+| `knife:rematch:requested` | `{ user_id }` | Opponent |
+| `knife:rematch:declined` | `{ user_id }` | Asker |
+| `knife:game:restarted` | `{ game, players }` | Both players |
+| `knife:player:disconnected` | `{ user_id, timeout_ms: 60000 }` | Opponent |
+| `knife:player:left` | `{ user_id }` | Opponent |
+

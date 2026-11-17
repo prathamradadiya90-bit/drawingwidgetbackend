@@ -2,6 +2,9 @@
 
 This guide provides end-to-end, step-by-step instructions for testing the **Tic-Tac-Toe Multiplayer Game** backend using **Postman**. It covers server setup, importing the Postman collection, executing all REST API HTTP endpoints (happy paths & edge cases), and performing real-time multiplayer testing using Postman's native **Socket.IO client** with two concurrent players (Host Alice & Guest Bob).
 
+> 🔪 **Looking to test the Knife Game Multiplayer?**
+> See the dedicated **[Knife Game Postman Testing Guide](KNIFE_GAME_POSTMAN_TESTING_GUIDE.md)** for testing knife throwing, clank/stick math, apple cuts, level progression, and rematch handling!
+
 ---
 
 ## Table of Contents

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import roomRoutes from './room.routes.js';
 import ticTacToeRoutes from './tictactoe.routes.js';
+import knifeRoutes from './knife.routes.js';
 
 export const apiRouter = Router();
 
@@ -11,6 +12,7 @@ apiRouter.get('/', (req, res) => {
     endpoints: {
       rooms: '/api/v1/rooms',
       tictactoe: '/api/v1/tictactoe',
+      knife: '/api/v1/knife',
     },
   });
 });
@@ -22,3 +24,7 @@ apiRouter.use('/rooms', roomRoutes);
 // Tic Tac Toe Endpoints (supports both /v1/tictactoe and /tictactoe)
 apiRouter.use('/v1/tictactoe', ticTacToeRoutes);
 apiRouter.use('/tictactoe', ticTacToeRoutes);
+
+// Knife Game Endpoints (supports both /v1/knife and /knife)
+apiRouter.use('/v1/knife', knifeRoutes);
+apiRouter.use('/knife', knifeRoutes);

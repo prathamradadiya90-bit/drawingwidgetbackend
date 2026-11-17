@@ -1,0 +1,469 @@
+{
+  "info": {
+    "_postman_id": "knife-8c4d-491a-96e2-30219488a011",
+    "name": "Knife Game Multiplayer API & WebSockets",
+    "description": "Complete Postman collection for testing Knife Game 2-player multiplayer backend, including HTTP REST endpoints, validation errors, and Socket.IO real-time gameplay (throw, clank/stick, apples cut, hearts, level cleared, rematch, and forfeit).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "knife_game_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "knife_game_code",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "knife_user_host",
+      "value": "knife_user_host_001",
+      "type": "string"
+    },
+    {
+      "key": "knife_user_guest",
+      "value": "knife_user_guest_002",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Health & Server Info",
+      "item": [
+        {
+          "name": "Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Server status ok and db connected\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql(\"ok\");",
+                  "    pm.expect(json.database).to.eql(\"connected\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Knife Game REST Endpoints",
+      "item": [
+        {
+          "name": "1. Create Knife Game (Host - Player Red)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test(\"Game created with Host assigned color red and waiting status\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.color).to.eql(\"red\");",
+                  "    pm.expect(json.data.game.status).to.eql(\"waiting\");",
+                  "    pm.expect(json.data.game.round).to.eql(1);",
+                  "    pm.expect(json.data.game.level).to.eql(1);",
+                  "    pm.expect(json.data.game.code).to.have.lengthOf(6);",
+                  "    pm.expect(json.data.players[0].profile_image).to.eql(\"A7\");",
+                  "    pm.collectionVariables.set(\"knife_game_id\", json.data.game.id);",
+                  "    pm.collectionVariables.set(\"knife_game_code\", json.data.game.code);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{knife_user_host}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alice (Host)\",\n  \"profile_image\": \"A7\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/knife",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "knife"
+              ]
+            },
+            "description": "Creates a new 2-player Knife Game. Host is assigned color red and receives a unique 6-character room code."
+          }
+        },
+        {
+          "name": "2. Join Knife Game via Code (Guest - Player Blue)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Guest joined with color blue and game status is playing\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.color).to.eql(\"blue\");",
+                  "    pm.expect(json.data.game.status).to.eql(\"playing\");",
+                  "    pm.expect(json.data.game.current_turn).to.eql(\"red\");",
+                  "    pm.expect(json.data.players.length).to.eql(2);",
+                  "    pm.expect(json.data.game.apples.length).to.be.at.least(4);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{knife_user_guest}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{knife_game_code}}\",\n  \"name\": \"Bob (Guest)\",\n  \"profile_image\": \"B3\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/knife/join",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "knife",
+                "join"
+              ]
+            },
+            "description": "Joins an existing Knife Game using the 6-character room code. Guest is assigned color blue, and status switches to 'playing' with red taking the first throw."
+          }
+        },
+        {
+          "name": "3. Get Knife Game Details by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Returns full game state, apples, and tuning config\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.game.id).to.eql(pm.collectionVariables.get(\"knife_game_id\"));",
+                  "    pm.expect(json.data.game.config.knife_touch_deg).to.eql(13.5);",
+                  "    pm.expect(json.data.game.config.apple_touch_deg).to.eql(14);",
+                  "    pm.expect(json.data.game.config.lives).to.eql(3);",
+                  "    pm.expect(json.data.game.config.level_pause_ms).to.eql(1000);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/knife/{{knife_game_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "knife",
+                "{{knife_game_id}}"
+              ]
+            },
+            "description": "Fetches full details of a Knife Game including apples, stuck knives, score, hearts, and game config."
+          }
+        },
+        {
+          "name": "4. Get Knife Game Details by Code",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Resolves game details by 6-char code\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.game.code).to.eql(pm.collectionVariables.get(\"knife_game_code\"));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/knife/code/{{knife_game_code}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "knife",
+                "code",
+                "{{knife_game_code}}"
+              ]
+            },
+            "description": "Resolves Knife Game state and players by the 6-character room code."
+          }
+        },
+        {
+          "name": "5. Error: Missing User ID Header (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 401 Unauthorized\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "pm.test(\"Returns missing user id error\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.false;",
+                  "    pm.expect(json.error).to.include(\"Missing or invalid user id header\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Anonymous\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/knife",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "knife"
+              ]
+            },
+            "description": "Verifies that creating a Knife Game without x-user-id header is rejected with HTTP 401."
+          }
+        },
+        {
+          "name": "6. Error: Join Invalid Knife Code (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 404 Not Found\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test(\"Returns game not found error matching spec\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.false;",
+                  "    pm.expect(json.error).to.include(\"No game found with code\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{knife_user_guest}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"ZZZZZZ\",\n  \"name\": \"Bob (Guest)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/knife/join",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "knife",
+                "join"
+              ]
+            },
+            "description": "Verifies that joining with non-existent code returns 'No game found with code X'."
+          }
+        },
+        {
+          "name": "7. Error: Join Knife Game Already Full (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 409 Conflict\", function () {",
+                  "    pm.response.to.have.status(409);",
+                  "});",
+                  "pm.test(\"Returns game full or ended error matching spec\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.false;",
+                  "    pm.expect(json.error).to.include(\"This game is full or has already ended\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "knife_intruder_003",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{knife_game_code}}\",\n  \"name\": \"Charlie (3rd Player)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/knife/join",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "knife",
+                "join"
+              ]
+            },
+            "description": "Verifies that attempting to join an active 2-player game returns 'This game is full or has already ended'."
+          }
+        }
+      ]
+    }
+  ]
+}

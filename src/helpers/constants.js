@@ -12,6 +12,12 @@ export const SocketEvents = {
   TTT_GAME_LEAVE: 'ttt:game:leave',
   TTT_MOVE: 'ttt:move',
   TTT_RESTART: 'ttt:restart',
+  KNIFE_GAME_JOIN: 'knife:game:join',
+  KNIFE_THROW: 'knife:throw',
+  KNIFE_REMATCH_REQUEST: 'knife:rematch:request',
+  KNIFE_REMATCH_RESPOND: 'knife:rematch:respond',
+  KNIFE_GAME_LEAVE: 'knife:game:leave',
+  KNIFE_TIME: 'knife:time',
 
   // Server -> Client
   PRESENCE_JOIN: 'presence:join',
@@ -30,6 +36,15 @@ export const SocketEvents = {
   TTT_MOVE_MADE: 'ttt:move:made',
   TTT_GAME_OVER: 'ttt:game:over',
   TTT_GAME_RESTARTED: 'ttt:game:restarted',
+  KNIFE_PLAYER_JOINED: 'knife:player:joined',
+  KNIFE_GAME_STARTED: 'knife:game:started',
+  KNIFE_THROWN: 'knife:thrown',
+  KNIFE_GAME_OVER: 'knife:game:over',
+  KNIFE_REMATCH_REQUESTED: 'knife:rematch:requested',
+  KNIFE_REMATCH_DECLINED: 'knife:rematch:declined',
+  KNIFE_GAME_RESTARTED: 'knife:game:restarted',
+  KNIFE_PLAYER_DISCONNECTED: 'knife:player:disconnected',
+  KNIFE_PLAYER_LEFT: 'knife:player:left',
   ERROR: 'app:error',
 };
 
@@ -73,6 +88,33 @@ export const TicTacToe = {
   ],
 };
 
+export const KnifeGame = {
+  Colors: {
+    RED: 'red',
+    BLUE: 'blue',
+  },
+  GameStatus: {
+    WAITING: 'waiting',
+    PLAYING: 'playing',
+    FINISHED: 'finished',
+    ABANDONED: 'abandoned',
+  },
+  EndReason: {
+    SCORE: 'SCORE',
+    OPPONENT_LEFT: 'OPPONENT_LEFT',
+    OPPONENT_DISCONNECTED: 'OPPONENT_DISCONNECTED',
+  },
+  Config: {
+    LIVES: 3,
+    KNIFE_TOUCH_DEG: 13.5,
+    APPLE_TOUCH_DEG: 14.0,
+    LEVEL_PAUSE_MS: 1000,
+  },
+  getAppleCount(level) {
+    return Math.min(2 + 2 * Math.max(1, level), 20);
+  },
+};
+
 export const SocketLimits = {
   RATE_PER_SEC: 120, // 120 updates/sec for persistent stroke actions
   BURST: 600, // Generous burst allowance for rapid multi-touch / complex stroke additions
@@ -84,6 +126,7 @@ export const SocketLimits = {
   MAX_CHAT_LENGTH: 10_000,
   APP_KILL_TIMEOUT_MS: 60_000, // 60s timeout after disconnect to free player slot
   TTT_FORFEIT_TIMEOUT_MS: 60_000, // 60s for a dropped Tic Tac Toe player to reconnect before forfeiting
+  KNIFE_FORFEIT_TIMEOUT_MS: 60_000, // 60s for a dropped Knife Game player to reconnect before forfeiting
 };
 
 export const ErrorCodes = {
@@ -106,4 +149,13 @@ export const ErrorCodes = {
   NOT_IN_GAME: 'NOT_IN_GAME',
   MOVE_FAILED: 'MOVE_FAILED',
   RESTART_FAILED: 'RESTART_FAILED',
+  THROW_FAILED: 'THROW_FAILED',
+  REMATCH_FAILED: 'REMATCH_FAILED',
+  GAME_NOT_ACTIVE: 'GAME_NOT_ACTIVE',
+  NOT_YOUR_TURN: 'NOT_YOUR_TURN',
+  STALE_THROW: 'STALE_THROW',
+  LEVEL_STARTING: 'LEVEL_STARTING',
+  INVALID_ANGLE: 'INVALID_ANGLE',
+  GAME_NOT_FINISHED: 'GAME_NOT_FINISHED',
+  OPPONENT_LEFT: 'OPPONENT_LEFT',
 };
