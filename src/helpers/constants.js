@@ -18,6 +18,12 @@ export const SocketEvents = {
   KNIFE_REMATCH_RESPOND: 'knife:rematch:respond',
   KNIFE_GAME_LEAVE: 'knife:game:leave',
   KNIFE_TIME: 'knife:time',
+  SHOOT_GAME_JOIN: 'shoot:game:join',
+  SHOOT_FIRE: 'shoot:fire',
+  SHOOT_REMATCH_REQUEST: 'shoot:rematch:request',
+  SHOOT_REMATCH_RESPOND: 'shoot:rematch:respond',
+  SHOOT_GAME_LEAVE: 'shoot:game:leave',
+  SHOOT_TIME: 'shoot:time',
 
   // Server -> Client
   PRESENCE_JOIN: 'presence:join',
@@ -45,6 +51,15 @@ export const SocketEvents = {
   KNIFE_GAME_RESTARTED: 'knife:game:restarted',
   KNIFE_PLAYER_DISCONNECTED: 'knife:player:disconnected',
   KNIFE_PLAYER_LEFT: 'knife:player:left',
+  SHOOT_PLAYER_JOINED: 'shoot:player:joined',
+  SHOOT_GAME_STARTED: 'shoot:game:started',
+  SHOOT_FIRED: 'shoot:fired',
+  SHOOT_GAME_OVER: 'shoot:game:over',
+  SHOOT_REMATCH_REQUESTED: 'shoot:rematch:requested',
+  SHOOT_REMATCH_DECLINED: 'shoot:rematch:declined',
+  SHOOT_GAME_RESTARTED: 'shoot:game:restarted',
+  SHOOT_PLAYER_DISCONNECTED: 'shoot:player:disconnected',
+  SHOOT_PLAYER_LEFT: 'shoot:player:left',
   ERROR: 'app:error',
 };
 
@@ -115,6 +130,39 @@ export const KnifeGame = {
   },
 };
 
+export const ShootGame = {
+  Colors: {
+    BLUE: 'blue',
+    RED: 'red',
+  },
+  GameStatus: {
+    WAITING: 'waiting',
+    PLAYING: 'playing',
+    FINISHED: 'finished',
+    ABANDONED: 'abandoned',
+  },
+  EndReason: {
+    SCORE: 'SCORE',
+    OPPONENT_LEFT: 'OPPONENT_LEFT',
+    OPPONENT_DISCONNECTED: 'OPPONENT_DISCONNECTED',
+  },
+  Config: {
+    max_shots: 5,
+    path_length: 100,
+    range_x: 139,
+    range_y: 168,
+    target_size: 280,
+    base_segment_ms: 800,
+    segment_step_ms: 50,
+    result_pause_ms: 1200,
+    bullseye_pause_ms: 1600,
+    start_delay_ms: 1000,
+    late_slack_ms: 1500,
+    early_slack_ms: 250,
+    turn_timeout_ms: 15000,
+  },
+};
+
 export const SocketLimits = {
   RATE_PER_SEC: 120, // 120 updates/sec for persistent stroke actions
   BURST: 600, // Generous burst allowance for rapid multi-touch / complex stroke additions
@@ -127,6 +175,7 @@ export const SocketLimits = {
   APP_KILL_TIMEOUT_MS: 60_000, // 60s timeout after disconnect to free player slot
   TTT_FORFEIT_TIMEOUT_MS: 60_000, // 60s for a dropped Tic Tac Toe player to reconnect before forfeiting
   KNIFE_FORFEIT_TIMEOUT_MS: 60_000, // 60s for a dropped Knife Game player to reconnect before forfeiting
+  SHOOT_FORFEIT_TIMEOUT_MS: 60_000, // 60s for a dropped Shoot Game player to reconnect before forfeiting
 };
 
 export const ErrorCodes = {
@@ -150,12 +199,18 @@ export const ErrorCodes = {
   MOVE_FAILED: 'MOVE_FAILED',
   RESTART_FAILED: 'RESTART_FAILED',
   THROW_FAILED: 'THROW_FAILED',
+  SHOT_FAILED: 'SHOT_FAILED',
   REMATCH_FAILED: 'REMATCH_FAILED',
   GAME_NOT_ACTIVE: 'GAME_NOT_ACTIVE',
   NOT_YOUR_TURN: 'NOT_YOUR_TURN',
   STALE_THROW: 'STALE_THROW',
+  STALE_SHOT: 'STALE_SHOT',
   LEVEL_STARTING: 'LEVEL_STARTING',
+  TURN_STARTING: 'TURN_STARTING',
   INVALID_ANGLE: 'INVALID_ANGLE',
+  INVALID_TIME: 'INVALID_TIME',
   GAME_NOT_FINISHED: 'GAME_NOT_FINISHED',
   OPPONENT_LEFT: 'OPPONENT_LEFT',
+  NO_REMATCH_REQUEST: 'NO_REMATCH_REQUEST',
+  CANNOT_ACCEPT_OWN_REMATCH: 'CANNOT_ACCEPT_OWN_REMATCH',
 };

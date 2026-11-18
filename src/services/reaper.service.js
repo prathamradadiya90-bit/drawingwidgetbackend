@@ -1,6 +1,7 @@
 import { roomService } from './room.service.js';
 import { ticTacToeService } from './tictactoe.service.js';
 import { knifeGameService } from './knife.service.js';
+import { shootGameService } from './shoot.service.js';
 import { config } from '../config/index.js';
 import { logger } from '../helpers/logger.js';
 
@@ -21,6 +22,11 @@ export async function reapRooms() {
     const removedKnifeGames = await knifeGameService.reapStaleGames(config.room.ttlHours);
     if (removedKnifeGames > 0) {
       logger.info(`Reaped ${removedKnifeGames} stale Knife game(s) idle > ${config.room.ttlHours}h`);
+    }
+
+    const removedShootGames = await shootGameService.reapStaleGames(config.room.ttlHours);
+    if (removedShootGames > 0) {
+      logger.info(`Reaped ${removedShootGames} stale Shoot game(s) idle > ${config.room.ttlHours}h`);
     }
   } catch (error) {
     logger.error('Room reaper task error:', error);

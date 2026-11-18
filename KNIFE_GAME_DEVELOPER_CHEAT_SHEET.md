@@ -452,7 +452,7 @@ final class KnifeGameSocketManager {
         
         socket.on("knife:rematch:requested") { data, _ in
             guard let dict = data.first as? [String: Any] else { return }
-            NotificationCenter.default.post(name: .onKnifeRematchRequested, object: dict)
+                NotificationCenter.default.post(name: .onKnifeRematchRequested, object: dict)
         }
         
         socket.on("knife:rematch:declined") { data, _ in
