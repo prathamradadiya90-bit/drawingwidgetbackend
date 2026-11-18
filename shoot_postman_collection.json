@@ -1,0 +1,632 @@
+{
+  "info": {
+    "_postman_id": "shoot-7b2e-48a1-893f-50319488a099",
+    "name": "Shoot Game Multiplayer API & WebSockets",
+    "description": "Complete Postman collection for testing the Shoot Game (\"Shoot your best shot\" 2-player online multiplayer target shooting game). Covers REST lobby endpoints, status transitions, validation errors, and Socket.IO real-time event definitions.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://drawing-widget-backend.onrender.com",
+      "type": "string"
+    },
+    {
+      "key": "socket_url",
+      "value": "https://drawing-widget-backend.onrender.com/v1",
+      "type": "string"
+    },
+    {
+      "key": "shoot_game_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "shoot_game_code",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "shoot_user_host",
+      "value": "shoot_user_host_001",
+      "type": "string"
+    },
+    {
+      "key": "shoot_user_guest",
+      "value": "shoot_user_guest_002",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Health & Server Info",
+      "item": [
+        {
+          "name": "Health Check (Database Status)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Server status ok and PostgreSQL connected\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql(\"ok\");",
+                  "    pm.expect(json.database).to.eql(\"connected\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            },
+            "description": "Checks the server health and ensures PostgreSQL database connection pool is active."
+          }
+        },
+        {
+          "name": "Lightweight Ping",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Ping returns pong\", function () {",
+                  "    pm.expect(pm.response.text()).to.eql(\"pong\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/ping",
+              "host": ["{{base_url}}"],
+              "path": ["ping"]
+            },
+            "description": "Zero-overhead ping endpoint used for waking up server from cold standby."
+          }
+        },
+        {
+          "name": "API Catalog & Endpoints",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Catalog exposes shoot endpoint\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.endpoints.shoot).to.eql(\"/api/v1/shoot\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api",
+              "host": ["{{base_url}}"],
+              "path": ["api"]
+            },
+            "description": "Returns online status and active API endpoint routes."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Shoot Game REST Endpoints",
+      "item": [
+        {
+          "name": "1. Create Shoot Game (Host - Player Blue)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () {",
+                  "    pm.response.to.have.status(201);",
+                  "});",
+                  "pm.test(\"Host assigned color blue and status is waiting\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.color).to.eql(\"blue\");",
+                  "    pm.expect(json.data.game.status).to.eql(\"waiting\");",
+                  "    pm.expect(json.data.game.round).to.eql(1);",
+                  "    pm.expect(json.data.game.first_turn).to.eql(\"blue\");",
+                  "    pm.expect(json.data.game.shot_number).to.eql(0);",
+                  "    pm.expect(json.data.game.code).to.have.lengthOf(6);",
+                  "    pm.expect(json.data.game.shots_left.blue).to.eql(5);",
+                  "    pm.expect(json.data.game.shots_left.red).to.eql(5);",
+                  "    pm.expect(json.data.game.config.max_shots).to.eql(5);",
+                  "    pm.expect(json.data.game.config.range_x).to.eql(139);",
+                  "    pm.expect(json.data.game.config.range_y).to.eql(168);",
+                  "    pm.expect(json.data.players[0].profile_image).to.eql(\"A7\");",
+                  "    pm.collectionVariables.set(\"shoot_game_id\", json.data.game.id);",
+                  "    pm.collectionVariables.set(\"shoot_game_code\", json.data.game.code);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{shoot_user_host}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alice (Host)\",\n  \"profile_image\": \"A7\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/shoot",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "shoot"]
+            },
+            "description": "Creates a new Shoot Game. Host is assigned color Blue and receives a unique 6-character uppercase join code."
+          }
+        },
+        {
+          "name": "2. Join Shoot Game (Guest - Player Red)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Guest assigned color red and status switches to playing\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.color).to.eql(\"red\");",
+                  "    pm.expect(json.data.game.status).to.eql(\"playing\");",
+                  "    pm.expect(json.data.game.current_turn).to.eql(\"blue\");",
+                  "    pm.expect(json.data.game.turn).to.not.be.null;",
+                  "    pm.expect(json.data.game.turn.color).to.eql(\"blue\");",
+                  "    pm.expect(json.data.game.turn.segment_ms).to.eql(800);",
+                  "    pm.expect(json.data.game.turn.path).to.have.lengthOf(100);",
+                  "    pm.expect(json.data.players).to.have.lengthOf(2);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{shoot_user_guest}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{shoot_game_code}}\",\n  \"name\": \"Bob (Guest)\",\n  \"profile_image\": \"B3\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/shoot/join",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "shoot", "join"]
+            },
+            "description": "Joins an active Shoot Game using the 6-character room code. Guest is assigned color Red, and game status transitions to 'playing' with Blue taking the first turn."
+          }
+        },
+        {
+          "name": "3. Get Shoot Game Details by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Returns full game state, active turn, and tuning config\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.game.id).to.eql(pm.collectionVariables.get(\"shoot_game_id\"));",
+                  "    pm.expect(json.data.game.config.target_size).to.eql(280);",
+                  "    pm.expect(json.data.game.config.range_x).to.eql(139);",
+                  "    pm.expect(json.data.game.config.range_y).to.eql(168);",
+                  "    pm.expect(json.data.game.config.bullseye_pause_ms).to.eql(1600);",
+                  "    pm.expect(json.data.game.config.result_pause_ms).to.eql(1200);",
+                  "    pm.expect(json.data.players).to.have.lengthOf(2);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/shoot/{{shoot_game_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "shoot", "{{shoot_game_id}}"]
+            },
+            "description": "Fetches full details of a Shoot Game including active turn coordinates, scores, shots remaining, and game config."
+          }
+        },
+        {
+          "name": "4. Get Shoot Game Details by Code",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"Resolves game details by 6-char code\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.game.code).to.eql(pm.collectionVariables.get(\"shoot_game_code\"));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/shoot/code/{{shoot_game_code}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "shoot", "code", "{{shoot_game_code}}"]
+            },
+            "description": "Resolves Shoot Game state and players by the 6-character room code."
+          }
+        },
+        {
+          "name": "5. Error: Missing User ID Header (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 401 Unauthorized\", function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});",
+                  "pm.test(\"Returns missing user id error\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.false;",
+                  "    pm.expect(json.error).to.include(\"Missing or invalid user id header\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Anonymous\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/shoot",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "shoot"]
+            },
+            "description": "Verifies that creating a Shoot Game without x-user-id header is rejected with HTTP 401."
+          }
+        },
+        {
+          "name": "6. Error: Join Invalid Shoot Code (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 404 Not Found\", function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});",
+                  "pm.test(\"Returns game not found error\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.false;",
+                  "    pm.expect(json.error).to.include(\"No game found with code\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{shoot_user_guest}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"ZZZZZZ\",\n  \"name\": \"Bob (Guest)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/shoot/join",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "shoot", "join"]
+            },
+            "description": "Verifies that joining with a non-existent code returns 'No game found with code X'."
+          }
+        },
+        {
+          "name": "7. Error: Join Shoot Game Already Full (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 409 Conflict\", function () {",
+                  "    pm.response.to.have.status(409);",
+                  "});",
+                  "pm.test(\"Returns game full or ended error\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.false;",
+                  "    pm.expect(json.error).to.include(\"This game is full or has already ended\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "shoot_intruder_003",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{shoot_game_code}}\",\n  \"name\": \"Charlie (3rd Player)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/shoot/join",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "shoot", "join"]
+            },
+            "description": "Verifies that attempting to join an active 2-player game returns 'This game is full or has already ended'."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Socket.IO Event Reference (Payloads & Samples)",
+      "item": [
+        {
+          "name": "Socket Connect Handshake Reference",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{socket_url}}",
+              "host": ["{{socket_url}}"]
+            },
+            "description": "Connect to WebSocket URL with auth parameters:\n\n```json\n{\n  \"userId\": \"shoot_user_host_001\",\n  \"devicetype\": \"ios\",\n  \"name\": \"Alice\",\n  \"profileImage\": \"A7\"\n}\n```\n\nExtra Headers:\n`x-user-id: shoot_user_host_001`\n`devicetype: ios`"
+          }
+        },
+        {
+          "name": "shoot:time (Clock Synchronization)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client_time\": 1794995470000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{socket_url}}",
+              "host": ["{{socket_url}}"]
+            },
+            "description": "Emitted by client to calculate network round-trip time and clock skew.\n\n**Server Ack:**\n```json\n{\n  \"ok\": true,\n  \"server_time\": 1794995470050\n}\n```"
+          }
+        },
+        {
+          "name": "shoot:game:join (Join Game Channel)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"game_id\": \"{{shoot_game_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{socket_url}}",
+              "host": ["{{socket_url}}"]
+            },
+            "description": "Joins the real-time Socket.IO room for this game.\n\n**Server Ack:**\n```json\n{\n  \"ok\": true,\n  \"your_color\": \"blue\",\n  \"game\": { ... },\n  \"players\": [ ... ]\n}\n```"
+          }
+        },
+        {
+          "name": "shoot:fire (Fire Shot)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"game_id\": \"{{shoot_game_id}}\",\n  \"shot_number\": 1,\n  \"elapsed_ms\": 1250\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{socket_url}}",
+              "host": ["{{socket_url}}"]
+            },
+            "description": "Emitted when shooter taps. `elapsed_ms` is the time elapsed since `turn.started_at` in server time.\n\n**Server Ack:**\n```json\n{\n  \"ok\": true,\n  \"game_id\": \"...\",\n  \"shot\": {\n    \"shot_number\": 1,\n    \"color\": \"blue\",\n    \"user_id\": \"shoot_user_host_001\",\n    \"elapsed_ms\": 1250,\n    \"adjusted\": false,\n    \"auto\": false,\n    \"x\": 12.35,\n    \"y\": -5.20,\n    \"path_progress\": 1.5625,\n    \"points\": 40\n  },\n  \"scores\": { \"blue\": 40, \"red\": 0 },\n  \"shots_left\": { \"blue\": 4, \"red\": 5 },\n  \"next_turn\": {\n    \"color\": \"red\",\n    \"shot_number\": 2,\n    \"started_at\": 1794995482000,\n    \"deadline_at\": 1794995497000,\n    \"path_progress\": 1.5625,\n    \"segment_ms\": 800,\n    \"path\": [ ... ]\n  },\n  \"shot_round\": 1,\n  \"game_over\": false,\n  \"winner\": null,\n  \"server_time\": 1794995480800\n}\n```"
+          }
+        },
+        {
+          "name": "shoot:rematch:request (Request Rematch)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"game_id\": \"{{shoot_game_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{socket_url}}",
+              "host": ["{{socket_url}}"]
+            },
+            "description": "Requests a rematch after a finished game. Opponent receives `shoot:rematch:requested`."
+          }
+        },
+        {
+          "name": "shoot:rematch:respond (Accept/Decline Rematch)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"game_id\": \"{{shoot_game_id}}\",\n  \"accept\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{socket_url}}",
+              "host": ["{{socket_url}}"]
+            },
+            "description": "Accepts or declines a pending rematch request. When accepted, BOTH players receive `shoot:game:restarted` for Round 2 with Red shooting first."
+          }
+        },
+        {
+          "name": "shoot:game:leave (Forfeit / Leave Game)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"game_id\": \"{{shoot_game_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{socket_url}}",
+              "host": ["{{socket_url}}"]
+            },
+            "description": "Voluntarily leaves the game. The remaining player is immediately awarded victory with reason `OPPONENT_LEFT`."
+          }
+        }
+      ]
+    }
+  ]
+}
