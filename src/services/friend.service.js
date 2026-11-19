@@ -224,7 +224,7 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
   );
   if (friendRows.length === 0) {
     throw new FriendServiceError(
-      'Target user is not on your friends list',
+      'You can only invite friends',
       400,
       ErrorCodes.NOT_FRIENDS
     );
@@ -253,7 +253,7 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
     gameRow = rows[0];
   } else {
     throw new FriendServiceError(
-      `Unsupported game type: ${game}`,
+      'That game has ended. Start a new one.',
       400,
       ErrorCodes.GAME_NOT_FOUND
     );
@@ -261,7 +261,7 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
 
   if (!gameRow) {
     throw new FriendServiceError(
-      `No game of type ${game} found with code ${roomCode}`,
+      'That game has ended. Start a new one.',
       404,
       ErrorCodes.GAME_NOT_FOUND
     );
@@ -269,7 +269,7 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
 
   if (gameRow.host_id !== hostUserId) {
     throw new FriendServiceError(
-      'Only the game host can send game invitations',
+      'Only the host can invite',
       403,
       ErrorCodes.NOT_HOST
     );
@@ -277,17 +277,23 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
 
   if (gameRow.status !== 'waiting') {
     throw new FriendServiceError(
-      'Game already has two players or is no longer waiting',
+      'Your game already has two players',
       409,
       ErrorCodes.GAME_FULL
     );
   }
 
-  // 3. Verify friend presence
+  // 3. Verify friend presence and name
+  const { rows: friendUsers } = await pool.query(
+    'SELECT name FROM users WHERE user_id = $1',
+    [toUserId]
+  );
+  const friendName = friendUsers[0]?.name || 'Friend';
+
   const friendPresence = getUserPresence(toUserId);
   if (!friendPresence.is_online) {
     throw new FriendServiceError(
-      'Friend is currently offline',
+      `${friendName} is offline`,
       400,
       ErrorCodes.FRIEND_OFFLINE
     );
@@ -295,7 +301,7 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
 
   if (friendPresence.status === 'in_game') {
     throw new FriendServiceError(
-      'Friend is currently busy playing another game',
+      `${friendName} is in another game`,
       400,
       ErrorCodes.FRIEND_BUSY
     );
@@ -419,9 +425,9 @@ export async function respondToGameInvite(io, { inviteId, friendUserId, accept }
 
   if (!gameRow || gameRow.status !== 'waiting') {
     throw new FriendServiceError(
-      'Game is already full or no longer waiting',
-      409,
-      ErrorCodes.GAME_FULL
+      'Invite has expired or already ended',
+      400,
+      ErrorCodes.INVITE_ENDED
     );
   }
 

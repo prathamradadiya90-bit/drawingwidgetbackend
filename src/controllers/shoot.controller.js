@@ -1,7 +1,8 @@
 import { shootGameService } from '../services/shoot.service.js';
 import { successResponse, errorResponse } from '../helpers/response.helper.js';
-import { SocketEvents } from '../helpers/constants.js';
+import { SocketEvents, ErrorCodes } from '../helpers/constants.js';
 import { broadcastShoot } from '../sockets/shoot.events.js';
+import { setPlayerInGame, cancelInvitesForGameRoom } from '../services/friend.service.js';
 
 const pickProfileImage = ({ profile_image, profileImage, avatar_url, avatarUrl, avatar }) =>
   profile_image || profileImage || avatar_url || avatarUrl || avatar || null;
@@ -44,6 +45,10 @@ export const shootController = {
 
     const io = req.app?.get('io');
     if (io) {
+      cancelInvitesForGameRoom(io, { game: 'shoot', roomCode: result.game.code, reason: ErrorCodes.GAME_FULL });
+      setPlayerInGame(io, result.game.host_id, 'shoot').catch(() => {});
+      setPlayerInGame(io, req.userId, 'shoot').catch(() => {});
+
       broadcastShoot(io, result.game.id, SocketEvents.SHOOT_PLAYER_JOINED, {
         user_id: req.userId,
         game: result.game,

@@ -209,6 +209,9 @@ export function registerTicTacToeEvents(socket, io) {
     const gameId = requireJoinedGame();
     cancelForfeit(gameId, userId);
     const result = await ticTacToeService.leaveGame({ gameId, userId });
+    if (result.abandoned && result.game.host_id === userId) {
+      cancelInvitesForGameRoom(io, { game: 'tictactoe', roomCode: result.game.code, reason: ErrorCodes.HOST_LEFT });
+    }
 
     socket.leave(gameChannel(gameId));
     socket.data.tttGameId = null;

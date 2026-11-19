@@ -65,7 +65,7 @@ function announceGameOver(io, gameId, winner, winnerUserId, isDraw, reason, scor
     reason: reason || EndReason.SCORE,
     scores,
   });
-  if (winnerUserId) clearPlayerInGame(io, winnerUserId);
+  if (reason && reason !== EndReason.SCORE && winnerUserId) clearPlayerInGame(io, winnerUserId);
 }
 
 function announceLeave(io, result, userId, exceptSocketId) {
@@ -104,6 +104,9 @@ function armForfeit(io, gameId, userId) {
         userId,
         reason: EndReason.OPPONENT_DISCONNECTED,
       });
+      if (result.abandoned && result.game.host_id === userId) {
+        cancelInvitesForGameRoom(io, { game: 'shoot', roomCode: result.game.code, reason: ErrorCodes.HOST_LEFT });
+      }
       announceLeave(io, result, userId);
     } catch (err) {
       if (!err.statusCode) logger.error(`Failed to forfeit Shoot game ${gameId}:`, err);
@@ -442,6 +445,9 @@ export function registerShootEvents(socket, io) {
     pendingRematches.delete(gameId);
 
     const result = await shootGameService.leaveGame({ gameId, userId });
+    if (result.abandoned && result.game.host_id === userId) {
+      cancelInvitesForGameRoom(io, { game: 'shoot', roomCode: result.game.code, reason: ErrorCodes.HOST_LEFT });
+    }
 
     socket.leave(gameChannel(gameId));
     socket.data.shootGameId = null;

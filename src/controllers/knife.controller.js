@@ -1,7 +1,8 @@
 import { knifeGameService } from '../services/knife.service.js';
 import { successResponse, errorResponse } from '../helpers/response.helper.js';
-import { SocketEvents } from '../helpers/constants.js';
+import { SocketEvents, ErrorCodes } from '../helpers/constants.js';
 import { broadcastKnife } from '../sockets/knife.events.js';
+import { setPlayerInGame, cancelInvitesForGameRoom } from '../services/friend.service.js';
 
 const pickProfileImage = ({ profile_image, profileImage, avatar_url, avatarUrl, avatar }) =>
   profile_image || profileImage || avatar_url || avatarUrl || avatar || null;
@@ -44,6 +45,10 @@ export const knifeController = {
 
     const io = req.app?.get('io');
     if (io) {
+      cancelInvitesForGameRoom(io, { game: 'knife', roomCode: result.game.code, reason: ErrorCodes.GAME_FULL });
+      setPlayerInGame(io, result.game.host_id, 'knife').catch(() => {});
+      setPlayerInGame(io, req.userId, 'knife').catch(() => {});
+
       broadcastKnife(io, result.game.id, SocketEvents.KNIFE_PLAYER_JOINED, {
         game: result.game,
         players: result.players,

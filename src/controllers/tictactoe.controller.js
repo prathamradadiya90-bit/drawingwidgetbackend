@@ -1,5 +1,7 @@
 import { ticTacToeService } from '../services/tictactoe.service.js';
 import { successResponse, errorResponse } from '../helpers/response.helper.js';
+import { ErrorCodes } from '../helpers/constants.js';
+import { setPlayerInGame, cancelInvitesForGameRoom } from '../services/friend.service.js';
 
 const pickProfileImage = ({ profile_image, profileImage, avatar_url, avatarUrl, avatar }) =>
   profile_image || profileImage || avatar_url || avatarUrl || avatar || null;
@@ -39,6 +41,14 @@ export const ticTacToeController = {
       userId: req.userId,
       deviceType: req.deviceType,
     });
+
+    const io = req.app?.get('io');
+    if (io) {
+      cancelInvitesForGameRoom(io, { game: 'tictactoe', roomCode: result.game.code, reason: ErrorCodes.GAME_FULL });
+      setPlayerInGame(io, result.game.host_id, 'tictactoe').catch(() => {});
+      setPlayerInGame(io, req.userId, 'tictactoe').catch(() => {});
+    }
+
     return successResponse(res, result, 'Joined game successfully.');
   }),
 

@@ -48,7 +48,10 @@ function cancelForfeit(gameId, userId) {
 }
 
 function announceGameOver(io, gameId, winner, winnerUserId, isDraw, reason, scores, lives, level) {
-  if (winnerUserId) clearPlayerInGame(io, winnerUserId);
+  // If reason is SCORE, keep players in_game while sitting on the result screen deciding on rematch
+  if (reason && reason !== 'SCORE' && winnerUserId) {
+    clearPlayerInGame(io, winnerUserId);
+  }
   broadcast(io, gameId, SocketEvents.KNIFE_GAME_OVER, {
     status: GameStatus.FINISHED,
     winner,
@@ -98,6 +101,9 @@ function armForfeit(io, gameId, userId) {
         userId,
         reason: EndReason.OPPONENT_DISCONNECTED,
       });
+      if (result.abandoned && result.game.host_id === userId) {
+        cancelInvitesForGameRoom(io, { game: 'knife', roomCode: result.game.code, reason: ErrorCodes.HOST_LEFT });
+      }
       announceLeave(io, result, userId);
     } catch (err) {
       if (!err.statusCode) logger.error(`Failed to forfeit Knife game ${gameId}:`, err);
@@ -358,6 +364,9 @@ export function registerKnifeEvents(socket, io) {
     cancelForfeit(gameId, userId);
     pendingRematches.delete(gameId);
     const result = await knifeGameService.leaveGame({ gameId, userId });
+    if (result.abandoned && result.game.host_id === userId) {
+      cancelInvitesForGameRoom(io, { game: 'knife', roomCode: result.game.code, reason: ErrorCodes.HOST_LEFT });
+    }
 
     socket.leave(gameChannel(gameId));
     socket.data.knifeGameId = null;
