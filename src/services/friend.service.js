@@ -247,7 +247,7 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
     gameRow = rows[0];
   } else if (normalizedGame === 'tictactoe') {
     const { rows } = await pool.query(
-      'SELECT id, host_id, status FROM tictactoe_games WHERE code = $1',
+      'SELECT id, host_id, status FROM ttt_games WHERE code = $1',
       [roomCode.toUpperCase()]
     );
     gameRow = rows[0];
@@ -417,7 +417,7 @@ export async function respondToGameInvite(io, { inviteId, friendUserId, accept }
     gameRow = rows[0];
   } else if (invite.game === 'tictactoe') {
     const { rows } = await pool.query(
-      'SELECT id, status FROM tictactoe_games WHERE code = $1',
+      'SELECT id, status FROM ttt_games WHERE code = $1',
       [invite.room_code]
     );
     gameRow = rows[0];

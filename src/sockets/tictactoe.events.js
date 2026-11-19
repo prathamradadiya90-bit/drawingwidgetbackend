@@ -36,7 +36,10 @@ function cancelForfeit(gameId, userId) {
 }
 
 function announceGameOver(io, game, winnerUserId) {
-  if (winnerUserId) clearPlayerInGame(io, winnerUserId);
+  // If game is finished normally (WIN or DRAW), keep players in_game while sitting on results screen
+  if (game.status === GameStatus.ABANDONED && winnerUserId) {
+    clearPlayerInGame(io, winnerUserId);
+  }
   broadcast(io, game.id, SocketEvents.TTT_GAME_OVER, {
     game_id: game.id,
     status: game.status,
@@ -74,6 +77,9 @@ function armForfeit(io, gameId, userId) {
         userId,
         reason: EndReason.OPPONENT_DISCONNECTED,
       });
+      if (result.abandoned && result.game.host_id === userId) {
+        cancelInvitesForGameRoom(io, { game: 'tictactoe', roomCode: result.game.code, reason: ErrorCodes.HOST_LEFT });
+      }
       announceLeave(io, result, userId);
     } catch (err) {
       // The player may have left, or the game may have been reaped, in the meantime.
@@ -110,12 +116,13 @@ export function registerTicTacToeEvents(socket, io) {
     });
   };
 
-  const requireJoinedGame = () => {
-    const gameId = socket.data.tttGameId;
+  const requireJoinedGame = (payloadGameId) => {
+    const gameId = payloadGameId || socket.data.tttGameId;
     if (!gameId) {
       const error = new Error('Join a game first');
       error.statusCode = 409;
       error.reason = ErrorCodes.NOT_IN_GAME;
+      error.code = 'NOT_IN_GAME';
       throw error;
     }
     return gameId;
@@ -205,8 +212,8 @@ export function registerTicTacToeEvents(socket, io) {
     );
   });
 
-  on(SocketEvents.TTT_GAME_LEAVE, null, async (_payload, ack) => {
-    const gameId = requireJoinedGame();
+  on(SocketEvents.TTT_GAME_LEAVE, null, async (payload, ack) => {
+    const gameId = requireJoinedGame(payload?.game_id);
     cancelForfeit(gameId, userId);
     const result = await ticTacToeService.leaveGame({ gameId, userId });
     if (result.abandoned && result.game.host_id === userId) {
