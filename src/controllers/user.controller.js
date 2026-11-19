@@ -12,6 +12,7 @@ export const userController = {
         name,
         profileImage: profile_image,
         platform: platform || req.deviceType,
+        authToken: req.authToken,
       });
       return successResponse(res, data, 'OK', 200);
     } catch (err) {

@@ -2,6 +2,12 @@ import crypto from 'node:crypto';
 import { pool } from '../config/db.js';
 import { FriendLimits, ErrorCodes, SocketEvents } from '../helpers/constants.js';
 import { logger } from '../helpers/logger.js';
+import {
+  generateDeviceToken,
+  hashDeviceToken,
+  verifyDeviceToken,
+} from '../helpers/auth.helper.js';
+import { notificationService } from './notification.service.js';
 
 export class FriendServiceError extends Error {
   constructor(message, statusCode = 400, code = null) {
@@ -292,8 +298,18 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
 
   const friendPresence = getUserPresence(toUserId);
   if (!friendPresence.is_online) {
+    // Record missed invite with reason: "OFFLINE"
+    notificationService.recordMissedInvite(io, {
+      toUserId,
+      fromUserId: hostUserId,
+      game: normalizedGame,
+      reason: 'OFFLINE',
+    }).catch((err) => {
+      logger.error('Failed to record offline missed invite:', err);
+    });
+
     throw new FriendServiceError(
-      `${friendName} is offline`,
+      `${friendName} is offline. We'll let them know you invited them.`,
       400,
       ErrorCodes.FRIEND_OFFLINE
     );
@@ -342,6 +358,16 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
     io.of('/v1').to(`user:${toUserId}`).emit(SocketEvents.INVITE_EXPIRED, expirePayload);
     io.to(`user:${hostUserId}`).emit(SocketEvents.INVITE_EXPIRED, expirePayload);
     io.to(`user:${toUserId}`).emit(SocketEvents.INVITE_EXPIRED, expirePayload);
+
+    // Record missed invite with reason: "NO_ANSWER"
+    notificationService.recordMissedInvite(io, {
+      toUserId,
+      fromUserId: hostUserId,
+      game: normalizedGame,
+      reason: 'NO_ANSWER',
+    }).catch((err) => {
+      logger.error('Failed to record expired missed invite:', err);
+    });
   }, FriendLimits.INVITE_TIMEOUT_MS);
 
   const inviteObj = {
@@ -496,7 +522,7 @@ export function cancelInvitesForGameRoom(io, { game, roomCode, reason = ErrorCod
 // ----------------------------------------------------
 export const friendService = {
   // POST /users/register
-  async registerUser({ userId, deviceId, name, profileImage, platform }) {
+  async registerUser({ userId, deviceId, name, profileImage, platform, authToken }) {
     const normalizedUserId = (userId || '').trim().toLowerCase();
     const cleanName = (name || '').trim().slice(0, 20) || 'Player';
     const cleanAvatar = (profileImage || '').trim() || 'A1';
@@ -514,22 +540,55 @@ export const friendService = {
       );
 
       let user = null;
+      let newlyGeneratedToken = null;
+
       if (existingRows.length > 0) {
-        // Update user
-        const { rows: updatedRows } = await client.query(
-          `UPDATE users
-           SET name = COALESCE($2, name),
-               profile_image = COALESCE($3, profile_image),
-               device_id = COALESCE($4, device_id),
-               platform = COALESCE($5, platform),
-               last_seen_at = NOW()
-           WHERE user_id = $1
-           RETURNING *`,
-          [normalizedUserId, cleanName, cleanAvatar, cleanDeviceId, cleanPlatform]
-        );
-        user = updatedRows[0];
+        const existing = existingRows[0];
+        if (existing.auth_token_hash) {
+          // User already has a token. Verify if authToken was passed directly:
+          if (authToken && !verifyDeviceToken(authToken, existing.auth_token_hash)) {
+            throw new FriendServiceError(
+              'Your session is no longer valid. Reinstall the app or contact support.',
+              401
+            );
+          }
+          // Update user without generating a new token
+          const { rows: updatedRows } = await client.query(
+            `UPDATE users
+             SET name = COALESCE($2, name),
+                 profile_image = COALESCE($3, profile_image),
+                 device_id = COALESCE($4, device_id),
+                 platform = COALESCE($5, platform),
+                 last_seen_at = NOW()
+             WHERE user_id = $1
+             RETURNING *`,
+            [normalizedUserId, cleanName, cleanAvatar, cleanDeviceId, cleanPlatform]
+          );
+          user = updatedRows[0];
+        } else {
+          // Existing user without a token claiming their token for the first time
+          newlyGeneratedToken = generateDeviceToken();
+          const tokenHash = hashDeviceToken(newlyGeneratedToken);
+
+          const { rows: updatedRows } = await client.query(
+            `UPDATE users
+             SET name = COALESCE($2, name),
+                 profile_image = COALESCE($3, profile_image),
+                 device_id = COALESCE($4, device_id),
+                 platform = COALESCE($5, platform),
+                 auth_token_hash = $6,
+                 last_seen_at = NOW()
+             WHERE user_id = $1
+             RETURNING *`,
+            [normalizedUserId, cleanName, cleanAvatar, cleanDeviceId, cleanPlatform, tokenHash]
+          );
+          user = updatedRows[0];
+        }
       } else {
-        // Create user with new unique friend code
+        // Create user with new unique friend code and new device token
+        newlyGeneratedToken = generateDeviceToken();
+        const tokenHash = hashDeviceToken(newlyGeneratedToken);
+
         let inserted = false;
         let attempts = 0;
         while (!inserted && attempts < 10) {
@@ -537,10 +596,10 @@ export const friendService = {
           const code = generateRandomFriendCode();
           try {
             const { rows: newRows } = await client.query(
-              `INSERT INTO users (user_id, friend_code, name, profile_image, device_id, platform, last_seen_at)
-               VALUES ($1, $2, $3, $4, $5, $6, NOW())
+              `INSERT INTO users (user_id, friend_code, name, profile_image, device_id, platform, auth_token_hash, last_seen_at)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
                RETURNING *`,
-              [normalizedUserId, code, cleanName, cleanAvatar, cleanDeviceId, cleanPlatform]
+              [normalizedUserId, code, cleanName, cleanAvatar, cleanDeviceId, cleanPlatform, tokenHash]
             );
             user = newRows[0];
             inserted = true;
@@ -559,10 +618,16 @@ export const friendService = {
 
       await client.query('COMMIT');
 
-      return {
+      const result = {
         user_id: user.user_id,
         friend_code: user.friend_code,
       };
+
+      if (newlyGeneratedToken) {
+        result.auth_token = newlyGeneratedToken;
+      }
+
+      return result;
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;

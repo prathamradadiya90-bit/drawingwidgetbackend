@@ -16,6 +16,7 @@ export async function runMigrations() {
       'knife_schema.sql',
       'shoot_schema.sql',
       'friends_schema.sql',
+      'friends_v2_schema.sql',
     ]) {
       await pool.query(readFileSync(join(__dirname, file), 'utf-8'));
     }

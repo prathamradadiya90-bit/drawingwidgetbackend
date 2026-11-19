@@ -35,6 +35,26 @@
       "key": "bob_friend_code",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "alice_auth_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bob_auth_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "request_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "notification_id",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -55,7 +75,8 @@
                   "    pm.expect(json.data.user_id).to.eql(pm.collectionVariables.get(\"user_alice_id\"));",
                   "    pm.expect(json.data.friend_code).to.have.lengthOf(8);",
                   "    pm.collectionVariables.set(\"alice_friend_code\", json.data.friend_code);",
-                  "});"
+                  "});",
+                  "    if (json.data.auth_token) { pm.collectionVariables.set(\"alice_auth_token\", json.data.auth_token); }"
                 ],
                 "type": "text/javascript"
               }
@@ -64,20 +85,46 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
-              { "key": "x-device-id", "value": "apple-vendor-id-alice", "type": "text" },
-              { "key": "devicetype", "value": "ios", "type": "text" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{user_alice_id}}",
+                "type": "text"
+              },
+              {
+                "key": "x-device-id",
+                "value": "apple-vendor-id-alice",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"device_id\": \"apple-vendor-id-alice\",\n  \"name\": \"Alice\",\n  \"profile_image\": \"A7\",\n  \"platform\": \"ios\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{base_url}}/api/v1/users/register",
-              "host": ["{{base_url}}"],
-              "path": ["api", "v1", "users", "register"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "register"
+              ]
             },
             "description": "Registers Alice on first app launch and returns her permanent 8-character friend code."
           }
@@ -96,7 +143,8 @@
                   "    pm.expect(json.data.user_id).to.eql(pm.collectionVariables.get(\"user_bob_id\"));",
                   "    pm.expect(json.data.friend_code).to.have.lengthOf(8);",
                   "    pm.collectionVariables.set(\"bob_friend_code\", json.data.friend_code);",
-                  "});"
+                  "});",
+                  "    if (json.data.auth_token) { pm.collectionVariables.set(\"bob_auth_token\", json.data.auth_token); }"
                 ],
                 "type": "text/javascript"
               }
@@ -105,20 +153,46 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "x-user-id", "value": "{{user_bob_id}}", "type": "text" },
-              { "key": "x-device-id", "value": "apple-vendor-id-bob", "type": "text" },
-              { "key": "devicetype", "value": "ios", "type": "text" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{user_bob_id}}",
+                "type": "text"
+              },
+              {
+                "key": "x-device-id",
+                "value": "apple-vendor-id-bob",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"device_id\": \"apple-vendor-id-bob\",\n  \"name\": \"Sunny Otter\",\n  \"profile_image\": \"A4\",\n  \"platform\": \"ios\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{base_url}}/api/v1/users/register",
-              "host": ["{{base_url}}"],
-              "path": ["api", "v1", "users", "register"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "register"
+              ]
             },
             "description": "Registers Bob and returns his permanent 8-character friend code."
           }
@@ -144,21 +218,83 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
-              { "key": "devicetype", "value": "ios", "type": "text" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{user_alice_id}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Alice Wonder\",\n  \"profile_image\": \"A9\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{base_url}}/api/v1/users/register",
-              "host": ["{{base_url}}"],
-              "path": ["api", "v1", "users", "register"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "register"
+              ]
             },
             "description": "Subsequent calls update the user's name or avatar while keeping the permanent friend code intact."
+          }
+        },
+        {
+          "name": "3. Re-Register Alice with x-auth-token (Token persists)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{user_alice_id}}"
+              },
+              {
+                "key": "x-auth-token",
+                "value": "{{alice_auth_token}}"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alice Wonder\",\n  \"profile_image\": \"A9\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/register",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "register"
+              ]
+            }
           }
         }
       ]
@@ -189,13 +325,29 @@
           "request": {
             "method": "GET",
             "header": [
-              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
-              { "key": "devicetype", "value": "ios", "type": "text" }
+              {
+                "key": "x-user-id",
+                "value": "{{user_alice_id}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
             ],
             "url": {
               "raw": "{{base_url}}/api/v1/users/by-code/{{bob_friend_code}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "v1", "users", "by-code", "{{bob_friend_code}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "by-code",
+                "{{bob_friend_code}}"
+              ]
             },
             "description": "Pre-fetches Bob's avatar and name so the user can verify before tapping Add."
           }
@@ -221,13 +373,29 @@
           "request": {
             "method": "GET",
             "header": [
-              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
-              { "key": "devicetype", "value": "ios", "type": "text" }
+              {
+                "key": "x-user-id",
+                "value": "{{user_alice_id}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
             ],
             "url": {
               "raw": "{{base_url}}/api/v1/users/by-code/{{alice_friend_code}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "v1", "users", "by-code", "{{alice_friend_code}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "by-code",
+                "{{alice_friend_code}}"
+              ]
             },
             "description": "Verifies that looking up your own code is rejected."
           }
@@ -253,13 +421,29 @@
           "request": {
             "method": "GET",
             "header": [
-              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
-              { "key": "devicetype", "value": "ios", "type": "text" }
+              {
+                "key": "x-user-id",
+                "value": "{{user_alice_id}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
             ],
             "url": {
               "raw": "{{base_url}}/api/v1/users/by-code/INVALID",
-              "host": ["{{base_url}}"],
-              "path": ["api", "v1", "users", "by-code", "INVALID"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "by-code",
+                "INVALID"
+              ]
             },
             "description": "Verifies codes that are not 8 characters from the Crockford alphabet are rejected."
           }
@@ -285,13 +469,29 @@
           "request": {
             "method": "GET",
             "header": [
-              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
-              { "key": "devicetype", "value": "ios", "type": "text" }
+              {
+                "key": "x-user-id",
+                "value": "{{user_alice_id}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              }
             ],
             "url": {
               "raw": "{{base_url}}/api/v1/users/by-code/ZZZZZZZZ",
-              "host": ["{{base_url}}"],
-              "path": ["api", "v1", "users", "by-code", "ZZZZZZZZ"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "by-code",
+                "ZZZZZZZZ"
+              ]
             },
             "description": "Verifies non-existent valid codes return HTTP 404."
           }
@@ -323,19 +523,44 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
-              { "key": "devicetype", "value": "ios", "type": "text" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{user_alice_id}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              },
+              {
+                "key": "x-auth-token",
+                "value": "{{alice_auth_token}}"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"friend_code\": \"{{bob_friend_code}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{base_url}}/api/v1/friends",
-              "host": ["{{base_url}}"],
-              "path": ["api", "v1", "friends"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "friends"
+              ]
             },
             "description": "Alice adds Bob using his friend code. Creates instant mutual friendship."
           }
@@ -361,19 +586,44 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
-              { "key": "devicetype", "value": "ios", "type": "text" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{user_alice_id}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              },
+              {
+                "key": "x-auth-token",
+                "value": "{{alice_auth_token}}"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"friend_code\": \"{{bob_friend_code}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
             "url": {
               "raw": "{{base_url}}/api/v1/friends",
-              "host": ["{{base_url}}"],
-              "path": ["api", "v1", "friends"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "friends"
+              ]
             },
             "description": "Verifies that adding an existing friend is rejected with 409."
           }
@@ -401,13 +651,31 @@
           "request": {
             "method": "GET",
             "header": [
-              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
-              { "key": "devicetype", "value": "ios", "type": "text" }
+              {
+                "key": "x-user-id",
+                "value": "{{user_alice_id}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              },
+              {
+                "key": "x-auth-token",
+                "value": "{{alice_auth_token}}"
+              }
             ],
             "url": {
               "raw": "{{base_url}}/api/v1/friends",
-              "host": ["{{base_url}}"],
-              "path": ["api", "v1", "friends"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "friends"
+              ]
             },
             "description": "Lists all mutual friends with live presence."
           }
@@ -432,15 +700,419 @@
           "request": {
             "method": "DELETE",
             "header": [
-              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
-              { "key": "devicetype", "value": "ios", "type": "text" }
+              {
+                "key": "x-user-id",
+                "value": "{{user_alice_id}}",
+                "type": "text"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios",
+                "type": "text"
+              },
+              {
+                "key": "x-auth-token",
+                "value": "{{alice_auth_token}}"
+              }
             ],
             "url": {
               "raw": "{{base_url}}/api/v1/friends/{{user_bob_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "v1", "friends", "{{user_bob_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "friends",
+                "{{user_bob_id}}"
+              ]
             },
             "description": "Removes friendship mutually on both sides."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Friend Requests (/friend-requests)",
+      "item": [
+        {
+          "name": "1. Send Friend Request by Code (Alice -> Bob)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 201 Created\", function () { pm.response.to.have.status(201); });",
+                  "const json = pm.response.json();",
+                  "pm.expect(json.success).to.be.true;",
+                  "pm.expect(json.data.request.request_id).to.be.a(\"string\");",
+                  "pm.collectionVariables.set(\"request_id\", json.data.request.request_id);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{user_alice_id}}"
+              },
+              {
+                "key": "x-auth-token",
+                "value": "{{alice_auth_token}}"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"friend_code\": \"{{bob_friend_code}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/friend-requests",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "friend-requests"
+              ]
+            }
+          }
+        },
+        {
+          "name": "2. Send Friend Request by user_id post-match (Alice -> Bob)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{user_alice_id}}"
+              },
+              {
+                "key": "x-auth-token",
+                "value": "{{alice_auth_token}}"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{user_bob_id}}\",\n  \"game\": \"shoot\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/friend-requests",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "friend-requests"
+              ]
+            }
+          }
+        },
+        {
+          "name": "3. List Open Requests for Bob (Incoming)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "const json = pm.response.json();",
+                  "pm.expect(json.data.incoming).to.be.an(\"array\");"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-user-id",
+                "value": "{{user_bob_id}}"
+              },
+              {
+                "key": "x-auth-token",
+                "value": "{{bob_auth_token}}"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/friend-requests",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "friend-requests"
+              ]
+            }
+          }
+        },
+        {
+          "name": "4. Accept Request (Bob accepts Alice)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "const json = pm.response.json();",
+                  "pm.expect(json.data.friend.user_id).to.eql(pm.collectionVariables.get(\"user_alice_id\"));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-user-id",
+                "value": "{{user_bob_id}}"
+              },
+              {
+                "key": "x-auth-token",
+                "value": "{{bob_auth_token}}"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/friend-requests/{{request_id}}/accept",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "friend-requests",
+                "{{request_id}}",
+                "accept"
+              ]
+            }
+          }
+        },
+        {
+          "name": "5. Decline Request (Bob declines Alice)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "x-user-id",
+                "value": "{{user_bob_id}}"
+              },
+              {
+                "key": "x-auth-token",
+                "value": "{{bob_auth_token}}"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/friend-requests/{{request_id}}/decline",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "friend-requests",
+                "{{request_id}}",
+                "decline"
+              ]
+            }
+          }
+        },
+        {
+          "name": "6. Cancel Request (Alice cancels)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "x-user-id",
+                "value": "{{user_alice_id}}"
+              },
+              {
+                "key": "x-auth-token",
+                "value": "{{alice_auth_token}}"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/friend-requests/{{request_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "friend-requests",
+                "{{request_id}}"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Notifications Inbox (/notifications)",
+      "item": [
+        {
+          "name": "1. List Active Notifications (Last 7 Days)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "const json = pm.response.json();",
+                  "pm.expect(json.data.notifications).to.be.an(\"array\");",
+                  "if (json.data.notifications.length > 0) {",
+                  "    pm.collectionVariables.set(\"notification_id\", json.data.notifications[0].notification_id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "x-user-id",
+                "value": "{{user_bob_id}}"
+              },
+              {
+                "key": "x-auth-token",
+                "value": "{{bob_auth_token}}"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/notifications",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications"
+              ]
+            }
+          }
+        },
+        {
+          "name": "2. Acknowledge Specific Notification",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{user_bob_id}}"
+              },
+              {
+                "key": "x-auth-token",
+                "value": "{{bob_auth_token}}"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notification_ids\": [\n    \"{{notification_id}}\"\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/notifications/ack",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "ack"
+              ]
+            }
+          }
+        },
+        {
+          "name": "3. Acknowledge All Missed Invites",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-user-id",
+                "value": "{{user_bob_id}}"
+              },
+              {
+                "key": "x-auth-token",
+                "value": "{{bob_auth_token}}"
+              },
+              {
+                "key": "devicetype",
+                "value": "ios"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"all\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/notifications/ack",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "notifications",
+                "ack"
+              ]
+            }
           }
         }
       ]
@@ -456,9 +1128,18 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"to_user_id\": \"{{user_bob_id}}\",\n  \"game\": \"shoot\",\n  \"room_code\": \"7Q6D4M\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "url": { "raw": "{{socket_url}}", "host": ["{{socket_url}}"] },
+            "url": {
+              "raw": "{{socket_url}}",
+              "host": [
+                "{{socket_url}}"
+              ]
+            },
             "description": "Emitted by game host in online lobby.\n\n**Reply Ack:**\n```json\n{\n  \"ok\": true,\n  \"invite_id\": \"3a2c-4b7e-...\",\n  \"expires_at\": 1795058720000\n}\n```"
           }
         },
@@ -467,7 +1148,12 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{socket_url}}", "host": ["{{socket_url}}"] },
+            "url": {
+              "raw": "{{socket_url}}",
+              "host": [
+                "{{socket_url}}"
+              ]
+            },
             "description": "Sent to friend's personal socket room:\n\n```json\n{\n  \"invite_id\": \"3a2c-4b7e-...\",\n  \"game\": \"shoot\",\n  \"room_code\": \"7Q6D4M\",\n  \"from\": {\n    \"user_id\": \"8f3c1a2e-...\",\n    \"name\": \"Alice\",\n    \"profile_image\": \"A7\",\n    \"friend_code\": \"P9VA6NBH\"\n  },\n  \"expires_at\": 1795058720000\n}\n```"
           }
         },
@@ -479,9 +1165,18 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"invite_id\": \"3a2c-4b7e-...\",\n  \"accept\": true\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "url": { "raw": "{{socket_url}}", "host": ["{{socket_url}}"] },
+            "url": {
+              "raw": "{{socket_url}}",
+              "host": [
+                "{{socket_url}}"
+              ]
+            },
             "description": "Friend taps Accept or Decline.\n\n**Reply Ack:**\n```json\n{\n  \"ok\": true,\n  \"accepted\": true,\n  \"game\": \"shoot\",\n  \"room_code\": \"7Q6D4M\"\n}\n```\n\nWhen accepted, friend immediately calls POST /api/v1/:game/join with room_code!"
           }
         },
@@ -493,9 +1188,18 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"invite_id\": \"3a2c-4b7e-...\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             },
-            "url": { "raw": "{{socket_url}}", "host": ["{{socket_url}}"] },
+            "url": {
+              "raw": "{{socket_url}}",
+              "host": [
+                "{{socket_url}}"
+              ]
+            },
             "description": "Host cancels the pending invitation."
           }
         }
@@ -503,4 +1207,3 @@
     }
   ]
 }
-

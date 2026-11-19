@@ -19,7 +19,7 @@ server.listen(config.port, () => {
   logger.info(`Multiplayer rooms API available at http://localhost:${config.port}/api/v1/rooms`);
 
   // Start background room reaper
-  startRoomReaper();
+  startRoomReaper(io);
 });
 
 // Graceful shutdown handling

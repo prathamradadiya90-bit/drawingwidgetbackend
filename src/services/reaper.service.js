@@ -2,10 +2,12 @@ import { roomService } from './room.service.js';
 import { ticTacToeService } from './tictactoe.service.js';
 import { knifeGameService } from './knife.service.js';
 import { shootGameService } from './shoot.service.js';
+import { friendRequestService } from './friend_request.service.js';
 import { config } from '../config/index.js';
 import { logger } from '../helpers/logger.js';
 
 let reaperInterval = null;
+let currentIo = null;
 
 export async function reapRooms() {
   try {
@@ -28,6 +30,11 @@ export async function reapRooms() {
     if (removedShootGames > 0) {
       logger.info(`Reaped ${removedShootGames} stale Shoot game(s) idle > ${config.room.ttlHours}h`);
     }
+
+    const { expiredCount, purgedNotifs } = await friendRequestService.sweepExpiredRequests(currentIo);
+    if (expiredCount > 0 || purgedNotifs > 0) {
+      logger.info(`Friend reaper: expired ${expiredCount} requests, purged ${purgedNotifs} old notifications`);
+    }
   } catch (error) {
     logger.error('Room reaper task error:', error);
   }
@@ -49,7 +56,8 @@ async function pingKeepAlive() {
 /**
  * Start periodic reaper service and keep-alive worker
  */
-export function startRoomReaper() {
+export function startRoomReaper(io = null) {
+  currentIo = io;
   if (reaperInterval) return;
 
   reaperInterval = setInterval(reapRooms, config.room.reapIntervalMs);

@@ -5,6 +5,8 @@ import knifeRoutes from './knife.routes.js';
 import shootRoutes from './shoot.routes.js';
 import userRoutes from './user.routes.js';
 import friendRoutes from './friend.routes.js';
+import friendRequestRoutes from './friend_request.routes.js';
+import notificationRoutes from './notification.routes.js';
 
 export const apiRouter = Router();
 
@@ -19,6 +21,8 @@ apiRouter.get('/', (req, res) => {
       shoot: '/api/v1/shoot',
       users: '/api/v1/users',
       friends: '/api/v1/friends',
+      friend_requests: '/api/v1/friend-requests',
+      notifications: '/api/v1/notifications',
     },
   });
 });
@@ -46,3 +50,11 @@ apiRouter.use('/users', userRoutes);
 // Friends Endpoints (supports both /v1/friends and /friends)
 apiRouter.use('/v1/friends', friendRoutes);
 apiRouter.use('/friends', friendRoutes);
+
+// Friend Requests Endpoints (supports both /v1/friend-requests and /friend-requests)
+apiRouter.use('/v1/friend-requests', friendRequestRoutes);
+apiRouter.use('/friend-requests', friendRequestRoutes);
+
+// Notifications Endpoints (supports both /v1/notifications and /notifications)
+apiRouter.use('/v1/notifications', notificationRoutes);
+apiRouter.use('/notifications', notificationRoutes);

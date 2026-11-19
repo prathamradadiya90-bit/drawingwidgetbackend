@@ -67,6 +67,11 @@ export const SocketEvents = {
   FRIEND_PRESENCE: 'friend:presence',
   FRIEND_ADDED: 'friend:added',
   FRIEND_REMOVED: 'friend:removed',
+  FRIEND_REQUEST_RECEIVED: 'friend:request:received',
+  FRIEND_REQUEST_ACCEPTED: 'friend:request:accepted',
+  FRIEND_REQUEST_ENDED: 'friend:request:ended',
+  NOTIFICATION_NEW: 'notification:new',
+  NOTIFICATION_REMOVED: 'notification:removed',
   INVITE_RECEIVED: 'invite:received',
   INVITE_ACCEPTED: 'invite:accepted',
   INVITE_DECLINED: 'invite:declined',
@@ -198,6 +203,13 @@ export const FriendLimits = {
   LOOKUP_RATE_LIMIT_WINDOW_MS: 60_000,
   INVITE_TIMEOUT_MS: 60_000,
   DISCONNECT_GRACE_MS: 5_000,
+  REQUEST_RATE_LIMIT_MAX: 30,
+  REQUEST_RATE_LIMIT_WINDOW_MS: 60 * 60 * 1000, // 1 hour
+  DECLINE_COOLDOWN_MS: 24 * 60 * 60 * 1000, // 24 hours
+  PLAYED_TOGETHER_WINDOW_MS: 24 * 60 * 60 * 1000, // 24 hours
+  MISSED_INVITE_DEDUP_MS: 30 * 60 * 1000, // 30 minutes
+  REQUEST_EXPIRATION_DAYS: 7,
+  NOTIFICATION_EXPIRATION_DAYS: 7,
 };
 
 export const ErrorCodes = {
