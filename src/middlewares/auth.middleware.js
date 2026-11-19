@@ -25,5 +25,13 @@ export const requireUser = (req, res, next) => {
 
   req.userId = userId.trim().toLowerCase();
   req.deviceType = deviceType;
+
+  const rawDeviceId =
+    req.headers['x-device-id'] ||
+    req.headers['device-id'] ||
+    req.headers['x-deviceid'] ||
+    req.body?.device_id;
+  req.deviceId = typeof rawDeviceId === 'string' && rawDeviceId.trim().length > 0 ? rawDeviceId.trim() : null;
+
   next();
 };

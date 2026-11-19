@@ -1,5 +1,6 @@
 import { SocketEvents, SocketLimits, ErrorCodes, ShootGame } from '../helpers/constants.js';
 import { shootGameService } from '../services/shoot.service.js';
+import { setPlayerInGame, clearPlayerInGame, cancelInvitesForGameRoom } from '../services/friend.service.js';
 import { sendSocketError } from './events.js';
 import { takeToken } from './rateLimiter.js';
 import { logger } from '../helpers/logger.js';
@@ -64,9 +65,11 @@ function announceGameOver(io, gameId, winner, winnerUserId, isDraw, reason, scor
     reason: reason || EndReason.SCORE,
     scores,
   });
+  if (winnerUserId) clearPlayerInGame(io, winnerUserId);
 }
 
 function announceLeave(io, result, userId, exceptSocketId) {
+  clearPlayerInGame(io, userId);
   broadcastShoot(
     io,
     result.game.id,
@@ -256,6 +259,10 @@ export function registerShootEvents(socket, io) {
               game: activeGame,
               players: activePlayers,
             });
+
+            cancelInvitesForGameRoom(io, { game: 'shoot', roomCode: game.code });
+            setPlayerInGame(io, userId, 'shoot').catch(() => {});
+            setPlayerInGame(io, opponent.user_id, 'shoot').catch(() => {});
 
             if (activeGame.turn) {
               armTurnTimeout(io, gameId, activeGame.turn);

@@ -24,6 +24,9 @@ export const SocketEvents = {
   SHOOT_REMATCH_RESPOND: 'shoot:rematch:respond',
   SHOOT_GAME_LEAVE: 'shoot:game:leave',
   SHOOT_TIME: 'shoot:time',
+  INVITE_SEND: 'invite:send',
+  INVITE_RESPOND: 'invite:respond',
+  INVITE_CANCEL: 'invite:cancel',
 
   // Server -> Client
   PRESENCE_JOIN: 'presence:join',
@@ -60,6 +63,15 @@ export const SocketEvents = {
   SHOOT_GAME_RESTARTED: 'shoot:game:restarted',
   SHOOT_PLAYER_DISCONNECTED: 'shoot:player:disconnected',
   SHOOT_PLAYER_LEFT: 'shoot:player:left',
+  FRIENDS_PRESENCE: 'friends:presence',
+  FRIEND_PRESENCE: 'friend:presence',
+  FRIEND_ADDED: 'friend:added',
+  FRIEND_REMOVED: 'friend:removed',
+  INVITE_RECEIVED: 'invite:received',
+  INVITE_ACCEPTED: 'invite:accepted',
+  INVITE_DECLINED: 'invite:declined',
+  INVITE_CANCELLED: 'invite:cancelled',
+  INVITE_EXPIRED: 'invite:expired',
   ERROR: 'app:error',
 };
 
@@ -178,6 +190,16 @@ export const SocketLimits = {
   SHOOT_FORFEIT_TIMEOUT_MS: 60_000, // 60s for a dropped Shoot Game player to reconnect before forfeiting
 };
 
+export const FriendLimits = {
+  MAX_FRIENDS: 200,
+  CODE_LENGTH: 8,
+  CODE_ALPHABET: 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789',
+  LOOKUP_RATE_LIMIT_MAX: 20,
+  LOOKUP_RATE_LIMIT_WINDOW_MS: 60_000,
+  INVITE_TIMEOUT_MS: 60_000,
+  DISCONNECT_GRACE_MS: 5_000,
+};
+
 export const ErrorCodes = {
   NOT_IN_ROOM: 'NOT_IN_ROOM',
   INVALID_ROOM_ID: 'INVALID_ROOM_ID',
@@ -213,4 +235,20 @@ export const ErrorCodes = {
   OPPONENT_LEFT: 'OPPONENT_LEFT',
   NO_REMATCH_REQUEST: 'NO_REMATCH_REQUEST',
   CANNOT_ACCEPT_OWN_REMATCH: 'CANNOT_ACCEPT_OWN_REMATCH',
+  NOT_FRIENDS: 'NOT_FRIENDS',
+  NOT_HOST: 'NOT_HOST',
+  GAME_FULL: 'GAME_FULL',
+  FRIEND_OFFLINE: 'FRIEND_OFFLINE',
+  FRIEND_BUSY: 'FRIEND_BUSY',
+  INVITE_ENDED: 'INVITE_ENDED',
+  INVITE_FAILED: 'INVITE_FAILED',
+  HOST_LEFT: 'HOST_LEFT',
+  REPLACED: 'REPLACED',
+  CANCELLED: 'CANCELLED',
+  CODE_NOT_FOUND: 'CODE_NOT_FOUND',
+  OWN_CODE: 'OWN_CODE',
+  ALREADY_FRIENDS: 'ALREADY_FRIENDS',
+  BAD_FORMAT: 'BAD_FORMAT',
+  FRIEND_LIMIT_REACHED: 'FRIEND_LIMIT_REACHED',
+  TOO_MANY_LOOKUPS: 'TOO_MANY_LOOKUPS',
 };

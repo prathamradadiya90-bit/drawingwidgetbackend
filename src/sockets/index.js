@@ -4,6 +4,7 @@ import { registerSocketEvents } from './events.js';
 import { registerTicTacToeEvents } from './tictactoe.events.js';
 import { registerKnifeEvents } from './knife.events.js';
 import { registerShootEvents } from './shoot.events.js';
+import { registerFriendEvents } from './friend.events.js';
 import { SocketLimits } from '../helpers/constants.js';
 import { logger } from '../helpers/logger.js';
 
@@ -33,6 +34,7 @@ export function initializeSocket(httpServer) {
     registerTicTacToeEvents(socket, io);
     registerKnifeEvents(socket, io);
     registerShootEvents(socket, io);
+    registerFriendEvents(socket, io);
   });
 
   // Also attach to default namespace for maximum client compatibility
@@ -42,6 +44,7 @@ export function initializeSocket(httpServer) {
     registerTicTacToeEvents(socket, io);
     registerKnifeEvents(socket, io);
     registerShootEvents(socket, io);
+    registerFriendEvents(socket, io);
   });
 
   logger.info('Socket.IO initialized on "/" and "/v1" namespaces');

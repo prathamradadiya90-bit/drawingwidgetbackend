@@ -1,5 +1,6 @@
 import { SocketEvents, SocketLimits, ErrorCodes, KnifeGame } from '../helpers/constants.js';
 import { knifeGameService } from '../services/knife.service.js';
+import { setPlayerInGame, clearPlayerInGame, cancelInvitesForGameRoom } from '../services/friend.service.js';
 import { sendSocketError } from './events.js';
 import { takeToken } from './rateLimiter.js';
 import { logger } from '../helpers/logger.js';
@@ -47,6 +48,7 @@ function cancelForfeit(gameId, userId) {
 }
 
 function announceGameOver(io, gameId, winner, winnerUserId, isDraw, reason, scores, lives, level) {
+  if (winnerUserId) clearPlayerInGame(io, winnerUserId);
   broadcast(io, gameId, SocketEvents.KNIFE_GAME_OVER, {
     status: GameStatus.FINISHED,
     winner,
@@ -60,6 +62,7 @@ function announceGameOver(io, gameId, winner, winnerUserId, isDraw, reason, scor
 }
 
 function announceLeave(io, result, userId, exceptSocketId) {
+  clearPlayerInGame(io, userId);
   broadcast(
     io,
     result.game.id,
@@ -186,6 +189,9 @@ export function registerKnifeEvents(socket, io) {
           const roundKey = `${gameId}:${game.round}`;
           if (!startedRounds.has(roundKey)) {
             startedRounds.add(roundKey);
+            cancelInvitesForGameRoom(io, { game: 'knife', roomCode: game.code });
+            setPlayerInGame(io, userId, 'knife');
+            setPlayerInGame(io, opponent.user_id, 'knife');
             broadcast(io, gameId, SocketEvents.KNIFE_GAME_STARTED, { game, players });
           }
         } else {

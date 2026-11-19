@@ -10,7 +10,13 @@ const __dirname = dirname(__filename);
 export async function runMigrations() {
   try {
     logger.info('Applying database schema migrations...');
-    for (const file of ['schema.sql', 'tictactoe_schema.sql', 'knife_schema.sql', 'shoot_schema.sql']) {
+    for (const file of [
+      'schema.sql',
+      'tictactoe_schema.sql',
+      'knife_schema.sql',
+      'shoot_schema.sql',
+      'friends_schema.sql',
+    ]) {
       await pool.query(readFileSync(join(__dirname, file), 'utf-8'));
     }
     logger.info('Database schema applied successfully.');

@@ -1,5 +1,6 @@
 import { SocketEvents, SocketLimits, ErrorCodes, TicTacToe } from '../helpers/constants.js';
 import { ticTacToeService } from '../services/tictactoe.service.js';
+import { setPlayerInGame, clearPlayerInGame, cancelInvitesForGameRoom } from '../services/friend.service.js';
 import { sendSocketError } from './events.js';
 import { takeToken } from './rateLimiter.js';
 import { logger } from '../helpers/logger.js';
@@ -35,6 +36,7 @@ function cancelForfeit(gameId, userId) {
 }
 
 function announceGameOver(io, game, winnerUserId) {
+  if (winnerUserId) clearPlayerInGame(io, winnerUserId);
   broadcast(io, game.id, SocketEvents.TTT_GAME_OVER, {
     game_id: game.id,
     status: game.status,
@@ -48,6 +50,7 @@ function announceGameOver(io, game, winnerUserId) {
 }
 
 function announceLeave(io, result, userId, exceptSocketId) {
+  clearPlayerInGame(io, userId);
   broadcast(
     io,
     result.game.id,
@@ -139,9 +142,14 @@ export function registerTicTacToeEvents(socket, io) {
 
     // A joined opponent who never connects must not leave this player waiting forever.
     if (game.status === GameStatus.PLAYING) {
+      cancelInvitesForGameRoom(io, { game: 'tictactoe', roomCode: game.code });
+      setPlayerInGame(io, userId, 'tictactoe');
       const opponent = players.find((player) => player.user_id !== userId);
-      if (!(await isUserConnected(io, gameId, opponent.user_id))) {
-        armForfeit(io, gameId, opponent.user_id);
+      if (opponent) {
+        setPlayerInGame(io, opponent.user_id, 'tictactoe');
+        if (!(await isUserConnected(io, gameId, opponent.user_id))) {
+          armForfeit(io, gameId, opponent.user_id);
+        }
       }
     }
   });

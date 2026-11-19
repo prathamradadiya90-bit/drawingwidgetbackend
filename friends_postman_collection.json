@@ -1,0 +1,505 @@
+{
+  "info": {
+    "_postman_id": "friends-49a1-43e2-88f1-30219488a077",
+    "name": "Friends & Game Invites API & WebSockets",
+    "description": "Complete Postman collection for testing the Friends System and Game Invites. Covers user registration, 8-character permanent friend codes, lookups, mutual friend list, friend removal, and Socket.IO real-time invites.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://drawing-widget-backend.onrender.com",
+      "type": "string"
+    },
+    {
+      "key": "socket_url",
+      "value": "https://drawing-widget-backend.onrender.com/v1",
+      "type": "string"
+    },
+    {
+      "key": "user_alice_id",
+      "value": "8f3c1a2e-0001-4000-8000-000000000001",
+      "type": "string"
+    },
+    {
+      "key": "user_bob_id",
+      "value": "8f3c1a2e-0002-4000-8000-000000000002",
+      "type": "string"
+    },
+    {
+      "key": "alice_friend_code",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "bob_friend_code",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. User Registration (POST /users/register)",
+      "item": [
+        {
+          "name": "1. Register Alice (Generates Friend Code)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Returns user_id and 8-char friend code\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.user_id).to.eql(pm.collectionVariables.get(\"user_alice_id\"));",
+                  "    pm.expect(json.data.friend_code).to.have.lengthOf(8);",
+                  "    pm.collectionVariables.set(\"alice_friend_code\", json.data.friend_code);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
+              { "key": "x-device-id", "value": "apple-vendor-id-alice", "type": "text" },
+              { "key": "devicetype", "value": "ios", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device_id\": \"apple-vendor-id-alice\",\n  \"name\": \"Alice\",\n  \"profile_image\": \"A7\",\n  \"platform\": \"ios\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "register"]
+            },
+            "description": "Registers Alice on first app launch and returns her permanent 8-character friend code."
+          }
+        },
+        {
+          "name": "2. Register Bob (Generates Friend Code)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Returns Bob user_id and 8-char friend code\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.user_id).to.eql(pm.collectionVariables.get(\"user_bob_id\"));",
+                  "    pm.expect(json.data.friend_code).to.have.lengthOf(8);",
+                  "    pm.collectionVariables.set(\"bob_friend_code\", json.data.friend_code);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-user-id", "value": "{{user_bob_id}}", "type": "text" },
+              { "key": "x-device-id", "value": "apple-vendor-id-bob", "type": "text" },
+              { "key": "devicetype", "value": "ios", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"device_id\": \"apple-vendor-id-bob\",\n  \"name\": \"Sunny Otter\",\n  \"profile_image\": \"A4\",\n  \"platform\": \"ios\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "register"]
+            },
+            "description": "Registers Bob and returns his permanent 8-character friend code."
+          }
+        },
+        {
+          "name": "3. Upsert / Update User (Preserves Friend Code)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Updates name and keeps existing friend_code\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.friend_code).to.eql(pm.collectionVariables.get(\"alice_friend_code\"));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
+              { "key": "devicetype", "value": "ios", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alice Wonder\",\n  \"profile_image\": \"A9\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "register"]
+            },
+            "description": "Subsequent calls update the user's name or avatar while keeping the permanent friend code intact."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Friend Code Lookups (GET /users/by-code/:code)",
+      "item": [
+        {
+          "name": "1. Lookup Bob by Code",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Resolves player info and friend code\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.user_id).to.eql(pm.collectionVariables.get(\"user_bob_id\"));",
+                  "    pm.expect(json.data.name).to.eql(\"Sunny Otter\");",
+                  "    pm.expect(json.data.friend_code).to.eql(pm.collectionVariables.get(\"bob_friend_code\"));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
+              { "key": "devicetype", "value": "ios", "type": "text" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/by-code/{{bob_friend_code}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "by-code", "{{bob_friend_code}}"]
+            },
+            "description": "Pre-fetches Bob's avatar and name so the user can verify before tapping Add."
+          }
+        },
+        {
+          "name": "2. Error: Lookup Own Code (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 400 Bad Request\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Returns own code message\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.false;",
+                  "    pm.expect(json.message).to.eql(\"That's your own friend code. Share it with a friend instead.\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
+              { "key": "devicetype", "value": "ios", "type": "text" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/by-code/{{alice_friend_code}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "by-code", "{{alice_friend_code}}"]
+            },
+            "description": "Verifies that looking up your own code is rejected."
+          }
+        },
+        {
+          "name": "3. Error: Bad Format Code (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 400 Bad Request\", function () { pm.response.to.have.status(400); });",
+                  "pm.test(\"Returns 8 letters and numbers message\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.false;",
+                  "    pm.expect(json.message).to.eql(\"Friend codes are 8 letters and numbers\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
+              { "key": "devicetype", "value": "ios", "type": "text" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/by-code/INVALID",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "by-code", "INVALID"]
+            },
+            "description": "Verifies codes that are not 8 characters from the Crockford alphabet are rejected."
+          }
+        },
+        {
+          "name": "4. Error: Code Not Found (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 404 Not Found\", function () { pm.response.to.have.status(404); });",
+                  "pm.test(\"Returns No player found error\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.false;",
+                  "    pm.expect(json.message).to.include(\"No player found with code\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
+              { "key": "devicetype", "value": "ios", "type": "text" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/users/by-code/ZZZZZZZZ",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "users", "by-code", "ZZZZZZZZ"]
+            },
+            "description": "Verifies non-existent valid codes return HTTP 404."
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Friends Management (/friends)",
+      "item": [
+        {
+          "name": "1. Add Friend by Code (POST /friends)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Returns mutual friend details\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.friend.user_id).to.eql(pm.collectionVariables.get(\"user_bob_id\"));",
+                  "    pm.expect(json.data.friend.name).to.eql(\"Sunny Otter\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
+              { "key": "devicetype", "value": "ios", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"friend_code\": \"{{bob_friend_code}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/friends",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "friends"]
+            },
+            "description": "Alice adds Bob using his friend code. Creates instant mutual friendship."
+          }
+        },
+        {
+          "name": "2. Error: Already Friends (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 409 Conflict\", function () { pm.response.to.have.status(409); });",
+                  "pm.test(\"Returns You're already friends message\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.false;",
+                  "    pm.expect(json.message).to.eql(\"You're already friends with Sunny Otter\");",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
+              { "key": "devicetype", "value": "ios", "type": "text" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"friend_code\": \"{{bob_friend_code}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/friends",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "friends"]
+            },
+            "description": "Verifies that adding an existing friend is rejected with 409."
+          }
+        },
+        {
+          "name": "3. List Friends (GET /friends)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Returns friends list with presence\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "    pm.expect(json.data.friends).to.be.an(\"array\");",
+                  "    pm.expect(json.data.friends.length).to.be.at.least(1);",
+                  "    pm.expect(json.data.friends[0].user_id).to.eql(pm.collectionVariables.get(\"user_bob_id\"));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
+              { "key": "devicetype", "value": "ios", "type": "text" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/friends",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "friends"]
+            },
+            "description": "Lists all mutual friends with live presence."
+          }
+        },
+        {
+          "name": "4. Remove Friend (DELETE /friends/:user_id)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"Status code is 200 OK\", function () { pm.response.to.have.status(200); });",
+                  "pm.test(\"Successfully removes friendship\", function () {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.success).to.be.true;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "x-user-id", "value": "{{user_alice_id}}", "type": "text" },
+              { "key": "devicetype", "value": "ios", "type": "text" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/friends/{{user_bob_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "friends", "{{user_bob_id}}"]
+            },
+            "description": "Removes friendship mutually on both sides."
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Socket.IO Game Invites & Presence Reference",
+      "item": [
+        {
+          "name": "invite:send (Host invites Friend)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"to_user_id\": \"{{user_bob_id}}\",\n  \"game\": \"shoot\",\n  \"room_code\": \"7Q6D4M\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{socket_url}}", "host": ["{{socket_url}}"] },
+            "description": "Emitted by game host in online lobby.\n\n**Reply Ack:**\n```json\n{\n  \"ok\": true,\n  \"invite_id\": \"3a2c-4b7e-...\",\n  \"expires_at\": 1795058720000\n}\n```"
+          }
+        },
+        {
+          "name": "invite:received (Incoming Invite to Friend)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "{{socket_url}}", "host": ["{{socket_url}}"] },
+            "description": "Sent to friend's personal socket room:\n\n```json\n{\n  \"invite_id\": \"3a2c-4b7e-...\",\n  \"game\": \"shoot\",\n  \"room_code\": \"7Q6D4M\",\n  \"from\": {\n    \"user_id\": \"8f3c1a2e-...\",\n    \"name\": \"Alice\",\n    \"profile_image\": \"A7\",\n    \"friend_code\": \"P9VA6NBH\"\n  },\n  \"expires_at\": 1795058720000\n}\n```"
+          }
+        },
+        {
+          "name": "invite:respond (Friend Accepts or Declines)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invite_id\": \"3a2c-4b7e-...\",\n  \"accept\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{socket_url}}", "host": ["{{socket_url}}"] },
+            "description": "Friend taps Accept or Decline.\n\n**Reply Ack:**\n```json\n{\n  \"ok\": true,\n  \"accepted\": true,\n  \"game\": \"shoot\",\n  \"room_code\": \"7Q6D4M\"\n}\n```\n\nWhen accepted, friend immediately calls POST /api/v1/:game/join with room_code!"
+          }
+        },
+        {
+          "name": "invite:cancel (Host Cancels Invite)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invite_id\": \"3a2c-4b7e-...\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": { "raw": "{{socket_url}}", "host": ["{{socket_url}}"] },
+            "description": "Host cancels the pending invitation."
+          }
+        }
+      ]
+    }
+  ]
+}

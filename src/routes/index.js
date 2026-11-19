@@ -3,6 +3,8 @@ import roomRoutes from './room.routes.js';
 import ticTacToeRoutes from './tictactoe.routes.js';
 import knifeRoutes from './knife.routes.js';
 import shootRoutes from './shoot.routes.js';
+import userRoutes from './user.routes.js';
+import friendRoutes from './friend.routes.js';
 
 export const apiRouter = Router();
 
@@ -15,6 +17,8 @@ apiRouter.get('/', (req, res) => {
       tictactoe: '/api/v1/tictactoe',
       knife: '/api/v1/knife',
       shoot: '/api/v1/shoot',
+      users: '/api/v1/users',
+      friends: '/api/v1/friends',
     },
   });
 });
@@ -34,3 +38,11 @@ apiRouter.use('/knife', knifeRoutes);
 // Shoot Game Endpoints (supports both /v1/shoot and /shoot)
 apiRouter.use('/v1/shoot', shootRoutes);
 apiRouter.use('/shoot', shootRoutes);
+
+// User & Registration Endpoints (supports both /v1/users and /users)
+apiRouter.use('/v1/users', userRoutes);
+apiRouter.use('/users', userRoutes);
+
+// Friends Endpoints (supports both /v1/friends and /friends)
+apiRouter.use('/v1/friends', friendRoutes);
+apiRouter.use('/friends', friendRoutes);
