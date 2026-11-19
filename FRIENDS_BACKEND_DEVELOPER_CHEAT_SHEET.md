@@ -266,23 +266,65 @@ Host (Lobby)                              Server                            Frie
 
 | Event Name | Sent To | Payload | Client Action |
 | :--- | :---: | :--- | :--- |
-| `invite:received` | Friend | `{ invite_id, game, room_code, from: { friend }, expires_at }` | Display incoming invitation alert with 60s timer. |
-| `invite:accepted` | Host | `{ invite_id, by_user_id, game, room_code }` | Host waiting modal dismisses; opponent joins lobby. |
-| `invite:declined` | Host | `{ invite_id, by_user_id }` | Show toast: *"Friend declined the invitation."* |
-| `invite:cancelled`| Both | `{ invite_id, reason }` | Reason: `"GAME_FULL"`, `"HOST_LEFT"`, `"REPLACED"`, `"CANCELLED"`. |
+| `invite:received` | Friend | `{ invite_id, game, room_code, from: { friend }, expires_at }` | Display incoming invitation banner/modal with 60s countdown. |
+| `invite:accepted` | Host | `{ invite_id, by_user_id, game, room_code }` | Host waiting modal transitions to *"Sunny is joining..."*; friend joins. |
+| `invite:declined` | Host | `{ invite_id, by_user_id }` | Show toast: *"Friend declined the invitation."* Lobby stays open. |
+| `invite:cancelled`| Both | `{ invite_id, reason }` | Reason: `"GAME_FULL"`, `"HOST_LEFT"`, `"REPLACED"`, `"CANCELLED"`. Hides banner. |
 | `invite:expired`  | Both | `{ invite_id }` | Auto-dismisses invite modal after 60s timeout. |
 
-#### Invite Error Codes (`ack { ok: false, code, error }`):
+---
 
-| Error `code` | Meaning |
-| :--- | :--- |
-| `NOT_FRIENDS` | `to_user_id` is not on the sender's friend list. |
-| `GAME_NOT_FOUND` | No game of that type found with `room_code`. |
-| `NOT_HOST` | Sender is not the game's host. |
-| `GAME_FULL` | Game already has two players or is no longer `waiting`. |
-| `FRIEND_OFFLINE` | Friend has no connected socket. |
-| `FRIEND_BUSY` | Friend's status is `in_game`. |
-| `INVITE_ENDED` | Responding to an invite that was cancelled, expired, or already used. |
+### 7.3 Checks on `invite:send` (Executed in Order)
+
+The server runs these 7 checks in strict order. The first failure is acked as `{ ok: false, code, error }` and also emitted as `app:error`. The iOS app displays `error` directly to the player:
+
+| # | Check Description | Fail `code` | Exact Player-Facing `error` |
+| :-: | :--- | :--- | :--- |
+| **1** | Sender and `to_user_id` are mutual friends | `NOT_FRIENDS` | `"You can only invite friends"` |
+| **2** | Target game with `room_code` exists | `GAME_NOT_FOUND` | `"That game has ended. Start a new one."` |
+| **3** | Sender is the game's `host_id` | `NOT_HOST` | `"Only the host can invite"` |
+| **4** | Game status is `waiting` with 1 player | `GAME_FULL` | `"Your game already has two players"` |
+| **5** | Friend has an active connected socket | `FRIEND_OFFLINE` | `"<Friend Name> is offline"` *(e.g. "Brave Fox is offline")* |
+| **6** | Friend is not currently in a game | `FRIEND_BUSY` | `"<Friend Name> is in another game"` *(e.g. "Brave Fox is in another game")* |
+| **7** | Host has another open invite | *(no error)* | Server sends `invite:cancelled { reason: "REPLACED" }` for the old invite, then sends the new one. |
+
+> **Note on `invite:respond` with `accept: true`:** If the game is already full or no longer `waiting`, the server acks `{ ok: false, code: "INVITE_ENDED" }` so the app displays *"That game has already started."*
+
+---
+
+### 7.4 Open Invite Cancellation Matrix
+
+An open invite automatically ends whenever the game state changes under it:
+
+| Trigger Event | Where in Code Today | Reason Broadcast (`invite:cancelled`) |
+| :--- | :--- | :--- |
+| **Someone else joins via code / QR** | REST `POST /:game/join` turns game `playing` | `GAME_FULL` |
+| **Host leaves waiting lobby** | `<game>:game:leave` while `waiting` | `HOST_LEFT` |
+| **Host drops and 60 s grace runs out** | Disconnect timeout $\to$ game marked `abandoned` | `HOST_LEFT` |
+| **Host sends a new invite** | `invite:send` while one is already pending | `REPLACED` |
+| **Host taps Cancel in lobby** | `invite:cancel { invite_id }` | `CANCELLED` |
+| **60 s timer expires without response** | In-memory 60 s invite timer | Emits `invite:expired { invite_id }` |
+
+---
+
+### 7.5 Presence Rules Across All Games (`knife`, `shoot`, `tictactoe`)
+
+1. **App Foregrounded:** Socket connects to `/v1` $\to$ automatically joins `user:<user_id>`. Server sends `friends:presence` initial sync, and friends receive `friend:presence { status: "online", game: null }`.
+2. **Game Goes Playing:** When the guest joins (via REST join $\to$ socket join), both players' statuses update to `in_game` with `game: "knife"`, `"shoot"`, or `"tictactoe"`.
+3. **Normal Game Over (`SCORE` / `WIN` / `DRAW`):** Both players **stay `in_game`** while they sit on the results screen deciding on a rematch.
+4. **Leaving Match Screen:** When a player leaves the match or results screen (`<game>:game:leave`), their status restores to `online`. The opponent restores to `online` once they exit their screen.
+5. **App Backgrounded / Disconnected:** Status transitions to `offline` after the 5-second disconnect grace window (`DISCONNECT_GRACE_MS = 5000`).
+6. **Rematches:** Rematches (`knife:rematch:*`, `shoot:rematch:*`, `ttt:restart`) operate within the existing match room and need no invite. After leaving, "New game" creates a fresh code for a new `invite:send`.
+
+---
+
+### 7.6 Game-Specific Join & Start Flow
+
+| Game | Host Lobby Setup | Friend Join Flow | Socket Start Event |
+| :--- | :--- | :--- | :--- |
+| **Knife Hit** | `POST /api/v1/knife` $\to$ host is `red`, status `waiting` | Friend accepts $\to$ `POST /api/v1/knife/join { code }` $\to$ `knife:game:join` | `knife:game:started` sent to both with `level_started_at` & `server_time`. |
+| **Target Shoot** | `POST /api/v1/shoot` $\to$ host is `blue`, status `waiting` | Friend accepts $\to$ `POST /api/v1/shoot/join { code }` (guest is `red`) $\to$ `shoot:game:join` | `shoot:game:started` sent to both with real synchronized first turn & crosshair path. |
+| **Tic Tac Toe** | `POST /api/v1/tictactoe` $\to$ host is `X`, status `waiting` | Friend accepts $\to$ `POST /api/v1/tictactoe/join { code }` (guest is `O`) $\to$ `ttt:game:join` | `ttt:player:joined` notifies host; board opens on both devices. |
 
 ---
 
