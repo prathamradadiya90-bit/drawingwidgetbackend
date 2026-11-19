@@ -9,3 +9,4 @@ router.post('/', requireUser, userController.register);
 router.get('/by-code/:code', requireUser, userController.getByCode);
 
 export default router;
+

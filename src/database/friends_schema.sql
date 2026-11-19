@@ -28,3 +28,4 @@ CREATE TABLE IF NOT EXISTS friendships (
 
 CREATE INDEX IF NOT EXISTS idx_friendships_user_b ON friendships(user_b);
 CREATE INDEX IF NOT EXISTS idx_friendships_created_at ON friendships(created_at DESC);
+

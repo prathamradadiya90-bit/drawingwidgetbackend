@@ -9,3 +9,4 @@ router.post('/', requireUser, friendController.add);
 router.delete('/:user_id', requireUser, friendController.remove);
 
 export default router;
+
