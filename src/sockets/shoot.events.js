@@ -229,17 +229,8 @@ export function registerShootEvents(socket, io) {
     socket.data.shootGameId = gameId;
     cancelForfeit(gameId, userId);
 
-    if (typeof ack === 'function') {
-      ack({ ok: true, game, players, your_color: color });
-    }
-
-    broadcastShoot(
-      io,
-      gameId,
-      SocketEvents.SHOOT_PLAYER_JOINED,
-      { user_id: userId, game, players },
-      socket.id
-    );
+    let activeGame = game;
+    let activePlayers = players;
 
     // If both players have joined and game is playing, inform both with shoot:game:started (once per round)
     if (game.status === GameStatus.PLAYING) {
@@ -255,8 +246,10 @@ export function registerShootEvents(socket, io) {
               gameId,
               delayMs: Config.start_delay_ms,
             });
-            const activeGame = startData ? startData.game : game;
-            const activePlayers = startData ? startData.players : players;
+            if (startData) {
+              activeGame = startData.game;
+              activePlayers = startData.players;
+            }
 
             broadcastShoot(io, gameId, SocketEvents.SHOOT_GAME_STARTED, {
               game: activeGame,
@@ -276,6 +269,18 @@ export function registerShootEvents(socket, io) {
         }
       }
     }
+
+    if (typeof ack === 'function') {
+      ack({ ok: true, game: activeGame, players: activePlayers, your_color: color });
+    }
+
+    broadcastShoot(
+      io,
+      gameId,
+      SocketEvents.SHOOT_PLAYER_JOINED,
+      { user_id: userId, game: activeGame, players: activePlayers },
+      socket.id
+    );
   });
 
   // shoot:fire
