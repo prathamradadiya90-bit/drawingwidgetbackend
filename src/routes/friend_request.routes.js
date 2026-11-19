@@ -13,3 +13,4 @@ router.post('/:request_id/decline', friendRequestController.declineRequest);
 router.delete('/:request_id', friendRequestController.cancelRequest);
 
 export default router;
+

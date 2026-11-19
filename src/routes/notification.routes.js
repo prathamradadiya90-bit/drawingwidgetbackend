@@ -10,3 +10,4 @@ router.get('/', notificationController.listNotifications);
 router.post('/ack', notificationController.acknowledge);
 
 export default router;
+

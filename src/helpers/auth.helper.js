@@ -34,3 +34,4 @@ export function verifyDeviceToken(token, storedHash) {
   }
   return crypto.timingSafeEqual(candidateBuf, storedBuf);
 }
+

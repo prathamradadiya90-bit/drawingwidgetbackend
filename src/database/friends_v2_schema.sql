@@ -42,3 +42,4 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notifications_request_id ON notifications(request_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_dedup ON notifications(user_id, from_user_id, game, type);
+
