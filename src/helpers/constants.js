@@ -264,3 +264,26 @@ export const ErrorCodes = {
   FRIEND_LIMIT_REACHED: 'FRIEND_LIMIT_REACHED',
   TOO_MANY_LOOKUPS: 'TOO_MANY_LOOKUPS',
 };
+
+/**
+ * Normalizes incoming game names and aliases to their standard identifier.
+ * Supports drawing, tictactoe, knife, and shoot along with aliases and variations.
+ */
+export function normalizeGameType(game) {
+  if (!game || typeof game !== 'string') return '';
+  const clean = game.replace(/["'“”]/g, '').trim().toLowerCase();
+  if (['drawing', 'draw', 'draw_together', 'drawtogether', 'draw-together', 'canvas', 'drawing_room'].includes(clean)) {
+    return 'drawing';
+  }
+  if (['tictactoe', 'ttt', 'tic_tac_toe', 'tic-tac-toe'].includes(clean)) {
+    return 'tictactoe';
+  }
+  if (['knife', 'knifehit', 'knife_hit', 'knife-hit'].includes(clean)) {
+    return 'knife';
+  }
+  if (['shoot', 'targetshoot', 'target_shoot', 'target-shoot'].includes(clean)) {
+    return 'shoot';
+  }
+  return clean;
+}
+

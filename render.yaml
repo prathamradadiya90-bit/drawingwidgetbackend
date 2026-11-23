@@ -9,6 +9,7 @@ services:
     name: drawing-widget-backend
     runtime: node
     plan: free
+    autoDeploy: true
     buildCommand: npm install
     startCommand: npm run db:migrate && npm start
     envVars:

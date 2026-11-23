@@ -229,7 +229,7 @@ async function runTests() {
     console.log('✓ invite:send succeeded and friend received invite:received event:', receivedInvite);
 
     // 9. Host sends new invite -> Check 7: Old invite cancelled with REPLACED
-    console.log('\n[9] Testing Check 7: Host sends another invite -> old invite cancelled with REPLACED ...');
+    console.log('\n[9] Testing Check 7: Host sends another invite with curly quotes & room id -> old invite cancelled with REPLACED ...');
     let cancelReason = null;
     friendSocket.once(SocketEvents.INVITE_CANCELLED, (payload) => {
       cancelReason = payload.reason;
@@ -237,16 +237,19 @@ async function runTests() {
 
     const sendSecondAck = await new Promise((resolve) => {
       hostSocket.emit('invite:send', {
-        to_user_id: users['draw-friend-02'].id,
-        game: 'drawing',
-        room_code: room.code,
+        toUserId: users['draw-friend-02'].id,
+        game: '“drawing”',
+        roomCode: room.id,
       }, resolve);
     });
+    if (!sendSecondAck.ok || !sendSecondAck.invite_id) {
+      throw new Error(`invite:send with curly quotes and room id failed: ${JSON.stringify(sendSecondAck)}`);
+    }
     await wait(100);
     if (cancelReason !== 'REPLACED') {
       throw new Error(`Expected previous invite cancelled with REPLACED, got: ${cancelReason}`);
     }
-    console.log('✓ Old invite cleanly cancelled with reason: REPLACED');
+    console.log('✓ Old invite cleanly cancelled with reason: REPLACED (and drawing aliases / room UUID resolution verified)');
 
     // 10. Friend accepts invite -> invite:accepted to host & ack to friend
     console.log('\n[10] Testing invite:respond (accept: true) ...');

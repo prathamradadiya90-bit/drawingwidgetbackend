@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { pool } from '../config/db.js';
-import { FriendLimits, ErrorCodes, SocketEvents } from '../helpers/constants.js';
+import { FriendLimits, ErrorCodes, SocketEvents, normalizeGameType } from '../helpers/constants.js';
 import { logger } from '../helpers/logger.js';
 import {
   generateDeviceToken,
@@ -221,9 +221,12 @@ export async function clearPlayerInGame(io, userId) {
 const activeInvites = new Map();
 
 export async function createGameInvite(io, { hostUserId, toUserId, game, roomCode }) {
+  const normalizedHostId = String(hostUserId || '').trim().toLowerCase();
+  const normalizedToId = String(toUserId || '').trim().toLowerCase();
+
   // 1. Verify mutual friendship
-  const userA = hostUserId < toUserId ? hostUserId : toUserId;
-  const userB = hostUserId < toUserId ? toUserId : hostUserId;
+  const userA = normalizedHostId < normalizedToId ? normalizedHostId : normalizedToId;
+  const userB = normalizedHostId < normalizedToId ? normalizedToId : normalizedHostId;
   const { rows: friendRows } = await pool.query(
     'SELECT 1 FROM friendships WHERE user_a = $1 AND user_b = $2',
     [userA, userB]
@@ -237,41 +240,45 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
   }
 
   // 2. Verify game exists and caller is host and game is waiting
-  const normalizedGame = (game || '').toLowerCase();
-  const normalizedRoomCode = (roomCode || '').trim().toUpperCase();
+  const normalizedGame = normalizeGameType(game);
+  const rawRoomCode = String(roomCode || '').replace(/["'“”]/g, '').trim();
+  const normalizedRoomCode = rawRoomCode.toUpperCase();
   let gameRow = null;
   let isWaiting = false;
 
   if (normalizedGame === 'shoot') {
     const { rows } = await pool.query(
-      'SELECT id, host_id, status FROM shoot_games WHERE code = $1',
+      'SELECT id, code, host_id, status FROM shoot_games WHERE code = $1',
       [normalizedRoomCode]
     );
     gameRow = rows[0];
     if (gameRow) isWaiting = gameRow.status === 'waiting';
   } else if (normalizedGame === 'knife') {
     const { rows } = await pool.query(
-      'SELECT id, host_id, status FROM knife_games WHERE code = $1',
+      'SELECT id, code, host_id, status FROM knife_games WHERE code = $1',
       [normalizedRoomCode]
     );
     gameRow = rows[0];
     if (gameRow) isWaiting = gameRow.status === 'waiting';
   } else if (normalizedGame === 'tictactoe') {
     const { rows } = await pool.query(
-      'SELECT id, host_id, status FROM ttt_games WHERE code = $1',
+      'SELECT id, code, host_id, status FROM ttt_games WHERE code = $1',
       [normalizedRoomCode]
     );
     gameRow = rows[0];
     if (gameRow) isWaiting = gameRow.status === 'waiting';
   } else if (normalizedGame === 'drawing') {
     const { rows } = await pool.query(
-      `SELECT r.id, r.host_id, r.player_count,
+      `SELECT r.id, r.code, r.host_id, r.player_count,
               (SELECT count(*)::int FROM room_members rm WHERE rm.room_id = r.id AND rm.left_at IS NULL) AS member_count
-       FROM rooms r WHERE r.code = $1`,
-      [normalizedRoomCode]
+       FROM rooms r
+       WHERE UPPER(TRIM(r.code)) = $1 OR r.id::text = $2`,
+      [normalizedRoomCode, rawRoomCode.toLowerCase()]
     );
     gameRow = rows[0];
-    if (gameRow) isWaiting = gameRow.member_count < gameRow.player_count;
+    if (gameRow) {
+      isWaiting = parseInt(gameRow.member_count, 10) < parseInt(gameRow.player_count, 10);
+    }
   } else {
     throw new FriendServiceError(
       'That game has ended. Start a new one.',
@@ -291,7 +298,7 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
     );
   }
 
-  if (gameRow.host_id !== hostUserId) {
+  if ((gameRow.host_id || '').trim().toLowerCase() !== normalizedHostId) {
     throw new FriendServiceError(
       'Only the host can invite',
       403,
@@ -313,16 +320,16 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
   // 3. Verify friend presence and name
   const { rows: friendUsers } = await pool.query(
     'SELECT name FROM users WHERE user_id = $1',
-    [toUserId]
+    [normalizedToId]
   );
   const friendName = friendUsers[0]?.name || 'Friend';
 
-  const friendPresence = getUserPresence(toUserId);
+  const friendPresence = getUserPresence(normalizedToId);
   if (!friendPresence.is_online) {
     // Record missed invite with reason: "OFFLINE"
     notificationService.recordMissedInvite(io, {
-      toUserId,
-      fromUserId: hostUserId,
+      toUserId: normalizedToId,
+      fromUserId: normalizedHostId,
       game: normalizedGame,
       reason: 'OFFLINE',
     }).catch((err) => {
@@ -346,7 +353,7 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
 
   // 4. Cancel any previous invite sent by this host (replaces old invite)
   for (const [id, inv] of activeInvites.entries()) {
-    if (inv.host_user_id === hostUserId) {
+    if (inv.host_user_id === normalizedHostId) {
       clearTimeout(inv.timer);
       activeInvites.delete(id);
       const cancelPayload = { invite_id: id, reason: ErrorCodes.REPLACED };
@@ -362,10 +369,10 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
   // 5. Fetch host user info to show in invite banner
   const { rows: hostUsers } = await pool.query(
     'SELECT user_id, name, profile_image, friend_code FROM users WHERE user_id = $1',
-    [hostUserId]
+    [normalizedHostId]
   );
   const hostUser = hostUsers[0] || {
-    user_id: hostUserId,
+    user_id: normalizedHostId,
     name: 'Friend',
     profile_image: 'A1',
     friend_code: '',
@@ -377,15 +384,17 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
   const timer = setTimeout(() => {
     activeInvites.delete(inviteId);
     const expirePayload = { invite_id: inviteId };
-    io.of('/v1').to(`user:${hostUserId}`).emit(SocketEvents.INVITE_EXPIRED, expirePayload);
-    io.of('/v1').to(`user:${toUserId}`).emit(SocketEvents.INVITE_EXPIRED, expirePayload);
-    io.to(`user:${hostUserId}`).emit(SocketEvents.INVITE_EXPIRED, expirePayload);
-    io.to(`user:${toUserId}`).emit(SocketEvents.INVITE_EXPIRED, expirePayload);
+    if (io) {
+      io.of('/v1').to(`user:${normalizedHostId}`).emit(SocketEvents.INVITE_EXPIRED, expirePayload);
+      io.of('/v1').to(`user:${normalizedToId}`).emit(SocketEvents.INVITE_EXPIRED, expirePayload);
+      io.to(`user:${normalizedHostId}`).emit(SocketEvents.INVITE_EXPIRED, expirePayload);
+      io.to(`user:${normalizedToId}`).emit(SocketEvents.INVITE_EXPIRED, expirePayload);
+    }
 
     // Record missed invite with reason: "NO_ANSWER"
     notificationService.recordMissedInvite(io, {
-      toUserId,
-      fromUserId: hostUserId,
+      toUserId: normalizedToId,
+      fromUserId: normalizedHostId,
       game: normalizedGame,
       reason: 'NO_ANSWER',
     }).catch((err) => {
@@ -393,12 +402,14 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
     });
   }, FriendLimits.INVITE_TIMEOUT_MS);
 
+  const cleanRoomCode = gameRow.code || normalizedRoomCode;
   const inviteObj = {
     invite_id: inviteId,
-    host_user_id: hostUserId,
-    to_user_id: toUserId,
+    host_user_id: normalizedHostId,
+    to_user_id: normalizedToId,
     game: normalizedGame,
-    room_code: roomCode.toUpperCase(),
+    room_code: cleanRoomCode,
+    room_id: gameRow.id,
     expires_at: expiresAt,
     timer,
   };
@@ -408,7 +419,7 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
   const inviteReceivedPayload = {
     invite_id: inviteId,
     game: normalizedGame,
-    room_code: roomCode.toUpperCase(),
+    room_code: cleanRoomCode,
     from: {
       user_id: hostUser.user_id,
       name: hostUser.name,
@@ -418,8 +429,8 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
     expires_at: expiresAt,
   };
 
-  io.of('/v1').to(`user:${toUserId}`).emit(SocketEvents.INVITE_RECEIVED, inviteReceivedPayload);
-  io.to(`user:${toUserId}`).emit(SocketEvents.INVITE_RECEIVED, inviteReceivedPayload);
+  io.of('/v1').to(`user:${normalizedToId}`).emit(SocketEvents.INVITE_RECEIVED, inviteReceivedPayload);
+  io.to(`user:${normalizedToId}`).emit(SocketEvents.INVITE_RECEIVED, inviteReceivedPayload);
 
   return {
     invite_id: inviteId,
@@ -451,39 +462,41 @@ export async function respondToGameInvite(io, { inviteId, friendUserId, accept }
   }
 
   // Accepted: check if game/room is still waiting
+  const normalizedGame = normalizeGameType(invite.game);
   let gameRow = null;
   let stillOpen = false;
 
-  if (invite.game === 'shoot') {
+  if (normalizedGame === 'shoot') {
     const { rows } = await pool.query(
-      'SELECT id, status FROM shoot_games WHERE code = $1',
+      'SELECT id, code, status FROM shoot_games WHERE code = $1',
       [invite.room_code]
     );
     gameRow = rows[0];
     stillOpen = Boolean(gameRow && gameRow.status === 'waiting');
-  } else if (invite.game === 'knife') {
+  } else if (normalizedGame === 'knife') {
     const { rows } = await pool.query(
-      'SELECT id, status FROM knife_games WHERE code = $1',
+      'SELECT id, code, status FROM knife_games WHERE code = $1',
       [invite.room_code]
     );
     gameRow = rows[0];
     stillOpen = Boolean(gameRow && gameRow.status === 'waiting');
-  } else if (invite.game === 'tictactoe') {
+  } else if (normalizedGame === 'tictactoe') {
     const { rows } = await pool.query(
-      'SELECT id, status FROM ttt_games WHERE code = $1',
+      'SELECT id, code, status FROM ttt_games WHERE code = $1',
       [invite.room_code]
     );
     gameRow = rows[0];
     stillOpen = Boolean(gameRow && gameRow.status === 'waiting');
-  } else if (invite.game === 'drawing') {
+  } else if (normalizedGame === 'drawing') {
     const { rows } = await pool.query(
-      `SELECT r.id, r.player_count,
+      `SELECT r.id, r.code, r.player_count,
               (SELECT count(*)::int FROM room_members rm WHERE rm.room_id = r.id AND rm.left_at IS NULL) AS member_count
-       FROM rooms r WHERE r.code = $1`,
-      [invite.room_code]
+       FROM rooms r
+       WHERE UPPER(TRIM(r.code)) = $1 OR r.id::text = $2`,
+      [invite.room_code.toUpperCase(), (invite.room_id || invite.room_code).toLowerCase()]
     );
     gameRow = rows[0];
-    stillOpen = Boolean(gameRow && gameRow.member_count < gameRow.player_count);
+    stillOpen = Boolean(gameRow && parseInt(gameRow.member_count, 10) < parseInt(gameRow.player_count, 10));
   }
 
   if (!stillOpen) {
@@ -496,9 +509,9 @@ export async function respondToGameInvite(io, { inviteId, friendUserId, accept }
 
   const payload = {
     invite_id: inviteId,
-    by_user_id: friendUserId,
-    game: invite.game,
-    room_code: invite.room_code,
+    by_user_id: String(friendUserId).trim().toLowerCase(),
+    game: normalizedGame,
+    room_code: gameRow?.code || invite.room_code,
   };
 
   io.of('/v1').to(`user:${hostUserId}`).emit(SocketEvents.INVITE_ACCEPTED, payload);
@@ -507,8 +520,8 @@ export async function respondToGameInvite(io, { inviteId, friendUserId, accept }
   return {
     ok: true,
     accepted: true,
-    game: invite.game,
-    room_code: invite.room_code,
+    game: normalizedGame,
+    room_code: gameRow?.code || invite.room_code,
   };
 }
 
@@ -516,7 +529,8 @@ export function cancelGameInvite(io, { inviteId, hostUserId }) {
   const invite = activeInvites.get(inviteId);
   if (!invite) return { ok: true };
 
-  if (invite.host_user_id !== hostUserId) {
+  const normalizedHostId = String(hostUserId || '').trim().toLowerCase();
+  if (invite.host_user_id !== normalizedHostId) {
     throw new FriendServiceError(
       'Only the host can cancel this invite',
       403,
@@ -538,9 +552,10 @@ export function cancelGameInvite(io, { inviteId, hostUserId }) {
 
 export function cancelInvitesForGameRoom(io, { game, roomCode, reason = ErrorCodes.GAME_FULL }) {
   if (!roomCode) return;
-  const upperCode = roomCode.toUpperCase();
+  const upperCode = String(roomCode).trim().toUpperCase();
+  const lowerCode = String(roomCode).trim().toLowerCase();
   for (const [id, inv] of activeInvites.entries()) {
-    if (inv.room_code === upperCode) {
+    if (inv.room_code.toUpperCase() === upperCode || (inv.room_id && inv.room_id.toLowerCase() === lowerCode)) {
       clearTimeout(inv.timer);
       activeInvites.delete(id);
       const cancelPayload = { invite_id: id, reason };

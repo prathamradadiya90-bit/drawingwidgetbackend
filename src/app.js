@@ -29,6 +29,8 @@ app.get('/health', async (req, res) => {
 
   res.status(200).json({
     status: 'ok',
+    version: '1.1.0',
+    build: 'drawing-invites-v2',
     database: dbStatus,
     timestamp: new Date().toISOString(),
   });

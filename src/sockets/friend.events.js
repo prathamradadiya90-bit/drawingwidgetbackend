@@ -62,7 +62,9 @@ export function registerFriendEvents(socket, io) {
 
   // invite:send
   on(SocketEvents.INVITE_SEND, ErrorCodes.INVITE_FAILED, async (payload, ack) => {
-    const { to_user_id: toUserId, game, room_code: roomCode } = payload;
+    const toUserId = payload?.to_user_id || payload?.toUserId || payload?.to_userId;
+    const game = payload?.game || payload?.game_type || payload?.gameType;
+    const roomCode = payload?.room_code || payload?.roomCode || payload?.code || payload?.room_id || payload?.roomId;
 
     if (!toUserId || !game || !roomCode) {
       sendSocketError(
@@ -77,7 +79,7 @@ export function registerFriendEvents(socket, io) {
 
     const result = await createGameInvite(io, {
       hostUserId: userId,
-      toUserId: toUserId.toLowerCase(),
+      toUserId: String(toUserId).trim().toLowerCase(),
       game,
       roomCode,
     });
