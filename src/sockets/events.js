@@ -1,11 +1,13 @@
 import crypto from 'node:crypto';
-import { SocketEvents, SocketLimits, DeviceTypes, ErrorCodes } from '../helpers/constants.js';
+import { SocketEvents, SocketLimits, DeviceTypes, ErrorCodes, FriendLimits } from '../helpers/constants.js';
 import { roomService } from '../services/room.service.js';
 import { strokeService } from '../services/stroke.service.js';
 import { chatService } from '../services/chat.service.js';
 import { pool } from '../config/db.js';
 import { takeToken } from './rateLimiter.js';
 import { logger } from '../helpers/logger.js';
+import { verifyDeviceToken } from '../helpers/auth.helper.js';
+import { cancelInvitesForGameRoom, setPlayerInGame, clearPlayerInGame } from '../services/friend.service.js';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -202,10 +204,18 @@ function normalizeStrokePayload(p) {
       extraFields.angle = angle;
     }
 
-    if (typeof strokeData !== 'string' || strokeData === '' || strokeData === '{}') {
+    // Item 5: Store the top-level fields whatever stroke_data holds, so stroke:backfill always brings shapes and emojis back
+    if (typeof strokeData === 'object' && strokeData !== null) {
       strokeData = {
-        ...rawObj,
+        ...strokeData,
         ...extraFields,
+      };
+    } else {
+      strokeData = {
+        ...extraFields,
+        ...(typeof strokeData === 'string' && strokeData.length > 0 && strokeData !== '{}'
+          ? { raw_stroke_data: strokeData, stroke_data: strokeData }
+          : {}),
       };
     }
   }
@@ -292,6 +302,25 @@ export function registerSocketEvents(socket, io) {
     }
 
     try {
+      // Item 7 & 9: Verify auth token on room:join, with the same 401 text as friends
+      const { rows: userRows } = await pool.query(
+        'SELECT auth_token_hash FROM users WHERE user_id = $1',
+        [userId]
+      );
+      if (userRows.length > 0 && userRows[0].auth_token_hash) {
+        const token = socket.data.authToken || payload?.token;
+        if (!token || !verifyDeviceToken(token, userRows[0].auth_token_hash)) {
+          sendSocketError(
+            socket,
+            SocketEvents.ROOM_JOIN,
+            'UNAUTHORIZED',
+            'Your session is no longer valid. Reinstall the app or contact support.',
+            ack
+          );
+          return;
+        }
+      }
+
       // Item 5: Ensure user actually joined through REST before letting them into room events
       const member = await roomService.getRoomMemberRaw(roomId, userId);
       if (!member) {
@@ -410,6 +439,14 @@ export function registerSocketEvents(socket, io) {
         members: formattedMembers,
       });
 
+      // Item 9: Second person joins (room full) -> both in_game, game: "drawing"
+      if (formattedMembers.length >= room.player_count) {
+        cancelInvitesForGameRoom(io, { game: 'drawing', roomCode: room.code, reason: ErrorCodes.GAME_FULL });
+        for (const m of formattedMembers) {
+          setPlayerInGame(io, m.user_id, 'drawing').catch(() => {});
+        }
+      }
+
       // Backfill existing strokes & chat
       try {
         if (deviceType === DeviceTypes.ANDROID) {
@@ -433,7 +470,7 @@ export function registerSocketEvents(socket, io) {
 
   // --- ROOM LEAVE ---
   socket.on(SocketEvents.ROOM_LEAVE, async (payload, ack) => {
-    const roomId = socket.data.roomId;
+    const roomId = socket.data.roomId || payload?.room_id || payload?.roomId;
     if (!roomId) {
       if (typeof ack === 'function') ack({ ok: true, message: 'Not currently in a room' });
       return;
@@ -448,23 +485,36 @@ export function registerSocketEvents(socket, io) {
     }
 
     try {
-      // Item 10 & 11: Free player slot and handle host departure
+      // Free player slot and handle host departure
       const leaveResult = await roomService.leaveRoom({ roomId, userId });
 
       if (leaveResult.room_closed) {
-        // Item 11: Host left -> broadcast room closed to all peers
+        // Host left -> broadcast room closed to all peers
         socket.to(roomId).emit(SocketEvents.ROOM_CLOSED, {
           reason: 'HOST_LEFT',
           message: 'The host has left the room. Room session ended.',
         });
+        cancelInvitesForGameRoom(io, { game: 'drawing', roomCode: leaveResult.room_code, reason: ErrorCodes.HOST_LEFT });
+        clearPlayerInGame(io, userId).catch(() => {});
+        if (leaveResult.other_user_ids) {
+          for (const uid of leaveResult.other_user_ids) {
+            clearPlayerInGame(io, uid).catch(() => {});
+          }
+        }
       } else {
         // Non-host left -> announce presence leave immediately
         socket.to(roomId).emit(SocketEvents.PRESENCE_LEAVE, { user_id: userId });
+        clearPlayerInGame(io, userId).catch(() => {});
+        if (leaveResult.host_id) {
+          // Host is now alone in room -> host back to online
+          clearPlayerInGame(io, leaveResult.host_id).catch(() => {});
+        }
       }
 
       await socket.leave(roomId);
       socket.data.roomId = undefined;
 
+      // Item 7: Ack { ok: true } once the leave is done and presence:leave has gone out
       if (typeof ack === 'function') ack({ ok: true, ...leaveResult });
     } catch (err) {
       logger.error(`Error in room:leave handler:`, err);
@@ -825,24 +875,35 @@ export function registerSocketEvents(socket, io) {
       logger.error('Error emitting presence:leave on disconnect:', err);
     }
 
-    // Item 10: 60-second app kill timeout to free player slot in database if leave call never arrives
+    // Item 4 & 9: 5-second disconnect grace timeout (matches spec: "Remove them once the 5 s grace runs out")
     const killTimer = setTimeout(async () => {
       disconnectTimers.delete(disconnectKey);
       try {
         const leaveResult = await roomService.leaveRoom({ roomId, userId });
-        logger.info(`App-kill timeout reached: freed slot for user ${userId.slice(0, 8)} in room ${roomId}`);
+        logger.info(`Disconnect grace timeout reached: freed slot for user ${userId.slice(0, 8)} in room ${roomId}`);
 
-        // Item 11: If host disconnected and never returned, close the room session
         if (leaveResult.room_closed) {
           socket.to(roomId).emit(SocketEvents.ROOM_CLOSED, {
             reason: 'HOST_DISCONNECTED',
             message: 'The host has disconnected. Room session ended.',
           });
+          cancelInvitesForGameRoom(io, { game: 'drawing', roomCode: leaveResult.room_code, reason: ErrorCodes.HOST_LEFT });
+          clearPlayerInGame(io, userId).catch(() => {});
+          if (leaveResult.other_user_ids) {
+            for (const uid of leaveResult.other_user_ids) {
+              clearPlayerInGame(io, uid).catch(() => {});
+            }
+          }
+        } else {
+          clearPlayerInGame(io, userId).catch(() => {});
+          if (leaveResult.host_id) {
+            clearPlayerInGame(io, leaveResult.host_id).catch(() => {});
+          }
         }
       } catch (err) {
         // Ignored if user already left or room deleted
       }
-    }, SocketLimits.APP_KILL_TIMEOUT_MS);
+    }, FriendLimits.DISCONNECT_GRACE_MS);
 
     disconnectTimers.set(disconnectKey, { killTimer });
   });

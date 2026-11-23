@@ -238,25 +238,40 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
 
   // 2. Verify game exists and caller is host and game is waiting
   const normalizedGame = (game || '').toLowerCase();
+  const normalizedRoomCode = (roomCode || '').trim().toUpperCase();
   let gameRow = null;
+  let isWaiting = false;
+
   if (normalizedGame === 'shoot') {
     const { rows } = await pool.query(
       'SELECT id, host_id, status FROM shoot_games WHERE code = $1',
-      [roomCode.toUpperCase()]
+      [normalizedRoomCode]
     );
     gameRow = rows[0];
+    if (gameRow) isWaiting = gameRow.status === 'waiting';
   } else if (normalizedGame === 'knife') {
     const { rows } = await pool.query(
       'SELECT id, host_id, status FROM knife_games WHERE code = $1',
-      [roomCode.toUpperCase()]
+      [normalizedRoomCode]
     );
     gameRow = rows[0];
+    if (gameRow) isWaiting = gameRow.status === 'waiting';
   } else if (normalizedGame === 'tictactoe') {
     const { rows } = await pool.query(
       'SELECT id, host_id, status FROM ttt_games WHERE code = $1',
-      [roomCode.toUpperCase()]
+      [normalizedRoomCode]
     );
     gameRow = rows[0];
+    if (gameRow) isWaiting = gameRow.status === 'waiting';
+  } else if (normalizedGame === 'drawing') {
+    const { rows } = await pool.query(
+      `SELECT r.id, r.host_id, r.player_count,
+              (SELECT count(*)::int FROM room_members rm WHERE rm.room_id = r.id AND rm.left_at IS NULL) AS member_count
+       FROM rooms r WHERE r.code = $1`,
+      [normalizedRoomCode]
+    );
+    gameRow = rows[0];
+    if (gameRow) isWaiting = gameRow.member_count < gameRow.player_count;
   } else {
     throw new FriendServiceError(
       'That game has ended. Start a new one.',
@@ -266,8 +281,11 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
   }
 
   if (!gameRow) {
+    const notFoundMsg = normalizedGame === 'drawing'
+      ? 'That room has closed. Start a new one.'
+      : 'That game has ended. Start a new one.';
     throw new FriendServiceError(
-      'That game has ended. Start a new one.',
+      notFoundMsg,
       404,
       ErrorCodes.GAME_NOT_FOUND
     );
@@ -281,9 +299,12 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
     );
   }
 
-  if (gameRow.status !== 'waiting') {
+  if (!isWaiting) {
+    const fullMsg = normalizedGame === 'drawing'
+      ? 'Your room already has two people'
+      : 'Your game already has two players';
     throw new FriendServiceError(
-      'Your game already has two players',
+      fullMsg,
       409,
       ErrorCodes.GAME_FULL
     );
@@ -323,16 +344,18 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
     );
   }
 
-  // 4. Cancel any previous invite sent by this host for this room
+  // 4. Cancel any previous invite sent by this host (replaces old invite)
   for (const [id, inv] of activeInvites.entries()) {
-    if (inv.host_user_id === hostUserId && inv.room_code === roomCode.toUpperCase()) {
+    if (inv.host_user_id === hostUserId) {
       clearTimeout(inv.timer);
       activeInvites.delete(id);
       const cancelPayload = { invite_id: id, reason: ErrorCodes.REPLACED };
-      io.of('/v1').to(`user:${inv.host_user_id}`).emit(SocketEvents.INVITE_CANCELLED, cancelPayload);
-      io.of('/v1').to(`user:${inv.to_user_id}`).emit(SocketEvents.INVITE_CANCELLED, cancelPayload);
-      io.to(`user:${inv.host_user_id}`).emit(SocketEvents.INVITE_CANCELLED, cancelPayload);
-      io.to(`user:${inv.to_user_id}`).emit(SocketEvents.INVITE_CANCELLED, cancelPayload);
+      if (io) {
+        io.of('/v1').to(`user:${inv.host_user_id}`).emit(SocketEvents.INVITE_CANCELLED, cancelPayload);
+        io.of('/v1').to(`user:${inv.to_user_id}`).emit(SocketEvents.INVITE_CANCELLED, cancelPayload);
+        io.to(`user:${inv.host_user_id}`).emit(SocketEvents.INVITE_CANCELLED, cancelPayload);
+        io.to(`user:${inv.to_user_id}`).emit(SocketEvents.INVITE_CANCELLED, cancelPayload);
+      }
     }
   }
 
@@ -427,29 +450,43 @@ export async function respondToGameInvite(io, { inviteId, friendUserId, accept }
     return { ok: true, accepted: false };
   }
 
-  // Accepted: check if game is still waiting
+  // Accepted: check if game/room is still waiting
   let gameRow = null;
+  let stillOpen = false;
+
   if (invite.game === 'shoot') {
     const { rows } = await pool.query(
       'SELECT id, status FROM shoot_games WHERE code = $1',
       [invite.room_code]
     );
     gameRow = rows[0];
+    stillOpen = Boolean(gameRow && gameRow.status === 'waiting');
   } else if (invite.game === 'knife') {
     const { rows } = await pool.query(
       'SELECT id, status FROM knife_games WHERE code = $1',
       [invite.room_code]
     );
     gameRow = rows[0];
+    stillOpen = Boolean(gameRow && gameRow.status === 'waiting');
   } else if (invite.game === 'tictactoe') {
     const { rows } = await pool.query(
       'SELECT id, status FROM ttt_games WHERE code = $1',
       [invite.room_code]
     );
     gameRow = rows[0];
+    stillOpen = Boolean(gameRow && gameRow.status === 'waiting');
+  } else if (invite.game === 'drawing') {
+    const { rows } = await pool.query(
+      `SELECT r.id, r.player_count,
+              (SELECT count(*)::int FROM room_members rm WHERE rm.room_id = r.id AND rm.left_at IS NULL) AS member_count
+       FROM rooms r WHERE r.code = $1`,
+      [invite.room_code]
+    );
+    gameRow = rows[0];
+    stillOpen = Boolean(gameRow && gameRow.member_count < gameRow.player_count);
   }
 
-  if (!gameRow || gameRow.status !== 'waiting') {
+  if (!stillOpen) {
     throw new FriendServiceError(
       'Invite has expired or already ended',
       400,

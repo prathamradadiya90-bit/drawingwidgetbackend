@@ -478,3 +478,52 @@ func registerUser() {
     }.resume()
 }
 ```
+
+
+---
+
+## 8. Draw Together: Friend Invites & Room Updates (Nov 20, 2026 Spec)
+
+Draw Together is a blank shared canvas for two friends (no template, no steps, no score, no winner). Friend invites reuse the shared invite contract (`game: "drawing"`).
+
+### 8.1 Room Contract Changes
+* **Creator is Host (Slot 1):** Room creator is guaranteed `slot_index: 1`. `room.host_id` is always populated in `POST /api/v1/rooms`, `POST /api/v1/rooms/join`, and `GET /api/v1/rooms/:id`. Guests never receive slot 1.
+* **`room:leave` Acknowledgement:** Emitting `room:leave` now acknowledges `{ ok: true }` once the leave is processed and `presence:leave` (or `room:closed`) has been emitted. The iOS app waits up to 2s for this ack before tearing down the socket.
+* **Dropped Member Visibility (`connected: true/false`):** `GET /api/v1/rooms/:id` provides `connected: true/false` for each member in `members`. Disconnected members are automatically freed from the room after a 5-second grace period.
+* **Shape & Emoji Persistence on Reload:** Top-level fields (`shape_type`, `coordinates`, `size`, `angle`, `emoji_id`, `stroke_id`, `fill_id`, `stroke_color`, `fill_color`, `stroke_width`) are permanently stored and returned at the top level in `stroke:backfill` and `GET /api/v1/rooms/:id/strokes`, regardless of what `stroke_data` contains.
+* **Removed Legacy Fields:** `svg_resource` and `step_index` are ignored; creating a room with neither field returns 201 Created cleanly.
+* **Strict Authentication:** `x-user-id` and `x-auth-token` headers are enforced on all `/api/v1/rooms/*` routes and on `room:join` with standard 401 error: `"Your session is no longer valid. Reinstall the app or contact support."`.
+
+### 8.2 Invite Flow for Drawing (`game: "drawing"`)
+1. **Host Invites Friend:** Emits `invite:send { to_user_id, game: "drawing", room_code: "<room.code>" }`.
+2. **Server Validations (Checks in order):**
+   * 1. Sender and recipient are friends $\to$ `NOT_FRIENDS`: `"You can only invite friends"`
+   * 2. Room exists and not closed $\to$ `GAME_NOT_FOUND`: `"That room has closed. Start a new one."`
+   * 3. Sender is `room.host_id` $\to$ `NOT_HOST`: `"Only the host can invite"`
+   * 4. Room has fewer than 2 members $\to$ `GAME_FULL`: `"Your room already has two people"`
+   * 5. Friend is online $\to$ `FRIEND_OFFLINE`: `"<Name> is offline. We'll let them know you invited them."` (records missed invite notification with `reason: "OFFLINE"`)
+   * 6. Friend is not in another game $\to$ `FRIEND_BUSY`: `"<Name> is in another game"`
+   * 7. Any prior open invite by host is replaced $\to$ `invite:cancelled { reason: "REPLACED" }`
+3. **Friend Receives Banner:** Friend socket gets `invite:received`:
+   ```json
+   {
+     "invite_id": "inv_8f2c...",
+     "game": "drawing",
+     "room_code": "XT95UQ",
+     "from": {
+       "user_id": "8f3c...",
+       "name": "Bumblebee",
+       "profile_image": "A1",
+       "friend_code": "P9VA6NBH"
+     },
+     "expires_at": 1795179254250
+   }
+   ```
+4. **Friend Accepts:** Emits `invite:respond { invite_id, accept: true }`. Server acks `{ ok: true, accepted: true, game: "drawing", room_code }` and emits `invite:accepted` to host.
+5. **Friend Joins:** Friend calls `POST /api/v1/rooms/join { code: "XT95UQ" }` (assigned slot 2), then emits `room:join`.
+6. **Presence Lifecycle:**
+   * 2nd person joins (room full) $\to$ both marked `in_game`, `game: "drawing"`.
+   * Guest leaves $\to$ guest back to `online`; host alone in room goes back to `online`.
+   * Host leaves $\to$ room closes (`room:closed`), both players return to `online`. Open invites cancelled with reason `HOST_LEFT`.
+   * Socket disconnect $\to$ offline after 5s grace period.
+7. **Played Together (24h Rule):** Sharing a drawing room counts towards the 24h played-together rule, enabling the post-canvas "Add as friend?" pop-up.

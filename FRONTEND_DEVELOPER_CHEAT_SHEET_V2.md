@@ -575,3 +575,70 @@ extension Notification.Name {
     static let friendPresenceChanged   = Notification.Name("friendPresenceChanged")
 }
 ```
+
+
+
+---
+
+## 8. Draw Together: Friend Invites & Canvas Sync (Nov 20, 2026 Spec)
+
+### 8.1 Room Contract & Changes
+* **Host Slot 1:** Creator always receives `slot_index: 1`. `room.host_id` is always returned. Guests joining via code are assigned `slot_index: 2`.
+* **Acknowledge `room:leave`:** Client should emit `room:leave` with an ack callback. The app waits up to 2 seconds for `{ ok: true }` before closing the socket.
+* **Dropped Member Presence:** `GET /api/v1/rooms/:id` returns `connected: true/false` on each member. Disconnected members drop out after 5s grace.
+* **Shape & Emoji Persistence:** Shapes and emojis retain all their fields (`shape_type`, `coordinates`, `size`, `angle`, `emoji_id`, `stroke_id`, `fill_id`, `stroke_width`) on backfill and reload even when `stroke_data` is sent.
+* **Template Fields Ignored:** `svg_resource` and `step_index` are ignored by the backend. Room create works without them.
+* **Fast Strokes & Zero-Drop WebSocket:** Backend supports 30+ moves/sec with growing payloads without dropping or disconnecting (`close code 1006` resolved).
+* **Token Auth on All Room Endpoints:** Provide `x-auth-token` header on all `/api/v1/rooms/*` routes and in `room:join`.
+
+### 8.2 Swift Implementation for Draw Together Invites
+
+```swift
+// 1. Host invites a friend to Draw Together
+func inviteFriendToDrawing(friendUserId: String, roomCode: String) {
+    let payload: [String: Any] = [
+        "to_user_id": friendUserId,
+        "game": "drawing",
+        "room_code": roomCode
+    ]
+    socket.emitWithAck("invite:send", payload).timingOut(after: 5) { data in
+        guard let response = data.first as? [String: Any],
+              let ok = response["ok"] as? Bool, ok else {
+            let errorMsg = (data.first as? [String: Any])?["error"] as? String ?? "Failed to send invite"
+            print("Invite error:", errorMsg)
+            return
+        }
+        print("Drawing invite sent successfully, id: \(response["invite_id"] ?? "")")
+    }
+}
+
+// 2. Friend responds to incoming drawing invite banner
+func respondToDrawingInvite(inviteId: String, accept: Bool) {
+    let payload: [String: Any] = [
+        "invite_id": inviteId,
+        "accept": accept
+    ]
+    socket.emitWithAck("invite:respond", payload).timingOut(after: 5) { data in
+        guard let response = data.first as? [String: Any],
+              let ok = response["ok"] as? Bool, ok else {
+            let code = (data.first as? [String: Any])?["code"] as? String
+            if code == "INVITE_ENDED" {
+                print("That room has already closed.")
+            }
+            return
+        }
+        
+        if accept, let roomCode = response["room_code"] as? String {
+            // Join drawing room via standard REST join
+            joinDrawingRoom(code: roomCode)
+        }
+    }
+}
+
+// 3. Graceful room:leave with ack
+func leaveDrawingRoom(roomId: String, completion: @escaping () -> Void) {
+    socket.emitWithAck("room:leave", ["room_id": roomId]).timingOut(after: 2) { _ in
+        completion()
+    }
+}
+```

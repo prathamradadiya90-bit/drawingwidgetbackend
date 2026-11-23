@@ -1,5 +1,6 @@
 import { pool, withTransaction } from '../config/db.js';
 import { RoomLimits, DeviceTypes } from '../helpers/constants.js';
+import { getUserPresence } from './friend.service.js';
 
 /**
  * Generate random unambiguous room code
@@ -35,12 +36,9 @@ export class ServiceError extends Error {
 export const roomService = {
   /**
    * Create a new multiplayer drawing room
+   * Item 2 & 6: svg_resource is ignored. Creator is always slot_index: 1, and room.host_id is set.
    */
   async createRoom({ svgResource = null, playerCount = 2, name, profileImage = null, hostId, deviceType = DeviceTypes.IOS }) {
-    if (svgResource !== undefined && svgResource !== null && typeof svgResource !== 'string') {
-      throw new ServiceError('svg_resource must be a string if provided', 422);
-    }
-
     const count = parseInt(playerCount, 10);
     if (isNaN(count) || count < RoomLimits.MIN_PLAYERS || count > RoomLimits.MAX_PLAYERS) {
       throw new ServiceError(`player_count must be between ${RoomLimits.MIN_PLAYERS} and ${RoomLimits.MAX_PLAYERS}`, 422);
@@ -65,11 +63,11 @@ export const roomService = {
         `INSERT INTO rooms (code, svg_resource, host_id, player_count, device_type)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING *`,
-        [code, svgResource || null, hostId, count, deviceType]
+        [code, typeof svgResource === 'string' ? svgResource : null, hostId, count, deviceType]
       );
       const room = rows[0];
 
-      // Assign host deterministic slot 1
+      // Item 2: Assign creator deterministic slot 1
       const slotIndex = 1;
       const memberName = name || getDefaultUserName(hostId);
 
@@ -88,6 +86,7 @@ export const roomService = {
 
   /**
    * Join an existing multiplayer room using room code
+   * Item 2: Slot 1 is always reserved for the room host. Joining players get slot 2..player_count.
    */
   async joinRoom({ code, name, profileImage = null, userId, deviceType = DeviceTypes.IOS }) {
     if (!code || typeof code !== 'string') {
@@ -144,19 +143,25 @@ export const roomService = {
           );
           const takenSlots = new Set(takenRes.rows.map((r) => r.slot_index));
 
-          const availableSlots = [];
-          for (let slot = 1; slot <= room.player_count; slot++) {
-            if (!takenSlots.has(slot)) {
-              availableSlots.push(slot);
+          let slotIndex;
+          if (userId === room.host_id) {
+            // Rejoining creator always gets slot 1
+            slotIndex = 1;
+          } else {
+            // Guest players must NEVER get slot 1 (slot 1 is strictly for the host)
+            const availableSlots = [];
+            for (let slot = 2; slot <= room.player_count; slot++) {
+              if (!takenSlots.has(slot)) {
+                availableSlots.push(slot);
+              }
             }
+
+            if (availableSlots.length === 0) {
+              throw new ServiceError('Room is full', 409);
+            }
+            slotIndex = availableSlots[0];
           }
 
-          if (availableSlots.length === 0) {
-            throw new ServiceError('Room is full', 409);
-          }
-
-          // Assign the lowest available slot (sequential 1..player_count)
-          const slotIndex = availableSlots[0];
           const memberName = name || getDefaultUserName(userId);
 
           if (existingRes.rows[0]) {
@@ -208,6 +213,12 @@ export const roomService = {
       const isHost = room.host_id === userId;
 
       if (isHost) {
+        const otherMembersRes = await client.query(
+          'SELECT user_id FROM room_members WHERE room_id = $1 AND left_at IS NULL AND user_id != $2',
+          [roomId, userId]
+        );
+        const otherUserIds = otherMembersRes.rows.map((r) => r.user_id);
+
         // Host departure closes room and releases all slots
         await client.query(
           `UPDATE room_members
@@ -220,6 +231,9 @@ export const roomService = {
           left: true,
           is_host: true,
           room_closed: true,
+          room_code: room.code,
+          host_id: room.host_id,
+          other_user_ids: otherUserIds,
           remaining_members: 0,
         };
       }
@@ -242,6 +256,8 @@ export const roomService = {
         left: true,
         is_host: false,
         room_closed: false,
+        room_code: room.code,
+        host_id: room.host_id,
         remaining_members: remainingCount,
       };
     });
@@ -249,6 +265,7 @@ export const roomService = {
 
   /**
    * Get room metadata and active member list
+   * Item 4: Add connected: true/false to each member based on current socket connectivity
    */
   async getRoom(roomId) {
     const roomRes = await pool.query('SELECT * FROM rooms WHERE id = $1', [roomId]);
@@ -265,9 +282,17 @@ export const roomService = {
       [roomId]
     );
 
+    const members = membersRes.rows.map((m) => {
+      const pres = getUserPresence(m.user_id);
+      return {
+        ...m,
+        connected: Boolean(pres.is_online),
+      };
+    });
+
     return {
       room,
-      members: membersRes.rows,
+      members,
     };
   },
 

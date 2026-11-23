@@ -8,6 +8,8 @@ import { registerFriendEvents } from './friend.events.js';
 import { SocketLimits } from '../helpers/constants.js';
 import { logger } from '../helpers/logger.js';
 
+let currentIO = null;
+
 /**
  * Initialize Socket.IO with CORS, buffer limits, and authentication
  */
@@ -25,6 +27,8 @@ export function initializeSocket(httpServer) {
     perMessageDeflate: false, // Disable per-message compression to eliminate CPU deflate bottlenecks during high-frequency drawing
     transports: ['websocket', 'polling'],
   });
+
+  currentIO = io;
 
   // Attach to /v1 namespace (primary iOS/Android namespace)
   const v1Namespace = io.of('/v1');
@@ -49,6 +53,10 @@ export function initializeSocket(httpServer) {
 
   logger.info('Socket.IO initialized on "/" and "/v1" namespaces');
   return io;
+}
+
+export function getIO() {
+  return currentIO;
 }
 
 export default initializeSocket;

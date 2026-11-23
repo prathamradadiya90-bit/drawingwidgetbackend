@@ -55,7 +55,11 @@ async function runTests() {
     const userC = 'v2-user-charlie-003';
     const userD = 'v2-user-dave-legacy-004';
 
-    // Clean up any test users from prior runs
+    // Clean up any test users and prior match data from prior runs
+    await pool.query('DELETE FROM shoot_players WHERE user_id IN ($1, $2, $3, $4)', [userA, userB, userC, userD]);
+    await pool.query("DELETE FROM shoot_games WHERE host_id IN ($1, $2, $3, $4) OR code = 'MATCH1'", [userA, userB, userC, userD]);
+    await pool.query('DELETE FROM knife_players WHERE user_id IN ($1, $2, $3, $4)', [userA, userB, userC, userD]);
+    await pool.query("DELETE FROM knife_games WHERE host_id IN ($1, $2, $3, $4) OR code = 'KNIFE1'", [userA, userB, userC, userD]);
     await pool.query('DELETE FROM users WHERE user_id IN ($1, $2, $3, $4)', [userA, userB, userC, userD]);
 
     // ----------------------------------------------------
@@ -446,6 +450,7 @@ async function runTests() {
     assert(noMatchData.message === 'You can only add players you just played with', 'Match requirement message matches');
 
     // Simulate match between A and C in shoot_games/shoot_players
+    await pool.query("DELETE FROM shoot_games WHERE code = 'MATCH1'");
     const { rows: gRows } = await pool.query(
       `INSERT INTO shoot_games (code, host_id, status, created_at)
        VALUES ('MATCH1', $1, 'finished', NOW()) RETURNING id`,
@@ -513,6 +518,7 @@ async function runTests() {
     );
 
     // Create a knife game for Alice
+    await pool.query("DELETE FROM knife_games WHERE code = 'KNIFE1'");
     const { rows: knifeRows } = await pool.query(
       `INSERT INTO knife_games (code, host_id, status, created_at)
        VALUES ('KNIFE1', $1, 'waiting', NOW()) RETURNING id, code`,

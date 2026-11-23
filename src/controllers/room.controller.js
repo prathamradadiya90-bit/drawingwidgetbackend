@@ -1,6 +1,9 @@
 import { roomService } from '../services/room.service.js';
 import { strokeService } from '../services/stroke.service.js';
 import { successResponse, errorResponse } from '../helpers/response.helper.js';
+import { cancelInvitesForGameRoom, setPlayerInGame, clearPlayerInGame } from '../services/friend.service.js';
+import { getIO } from '../sockets/index.js';
+import { ErrorCodes } from '../helpers/constants.js';
 
 export const roomController = {
   /**
@@ -68,6 +71,20 @@ export const roomController = {
         deviceType,
       });
 
+      const io = req.app?.get('io') || getIO();
+      if (io) {
+        // Presence and invite hooks: check if room is full
+        try {
+          const { members } = await roomService.getRoom(result.room.id);
+          if (members && members.length >= result.room.player_count) {
+            cancelInvitesForGameRoom(io, { game: 'drawing', roomCode: result.room.code, reason: ErrorCodes.GAME_FULL });
+            for (const m of members) {
+              setPlayerInGame(io, m.user_id, 'drawing').catch(() => {});
+            }
+          }
+        } catch (_) {}
+      }
+
       return successResponse(res, result, 'Joined room successfully.', 200);
     } catch (error) {
       if (error.statusCode) {
@@ -90,6 +107,24 @@ export const roomController = {
         roomId: room_id,
         userId,
       });
+
+      const io = req.app?.get('io') || getIO();
+      if (io) {
+        if (result.room_closed) {
+          cancelInvitesForGameRoom(io, { game: 'drawing', roomCode: result.room_code, reason: ErrorCodes.HOST_LEFT });
+          clearPlayerInGame(io, userId).catch(() => {});
+          if (result.other_user_ids) {
+            for (const uid of result.other_user_ids) {
+              clearPlayerInGame(io, uid).catch(() => {});
+            }
+          }
+        } else {
+          clearPlayerInGame(io, userId).catch(() => {});
+          if (result.host_id) {
+            clearPlayerInGame(io, result.host_id).catch(() => {});
+          }
+        }
+      }
 
       return successResponse(res, result, 'Left room successfully.', 200);
     } catch (error) {

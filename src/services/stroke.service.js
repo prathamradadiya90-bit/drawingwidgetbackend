@@ -50,10 +50,14 @@ export const strokeService = {
         } catch (_) {}
       }
       const extra = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+      const originalStrokeData = extra.raw_stroke_data !== undefined
+        ? extra.raw_stroke_data
+        : (extra.stroke_data !== undefined ? extra.stroke_data : parsed);
+
       return {
         ...r,
         ...extra,
-        stroke_data: parsed,
+        stroke_data: originalStrokeData,
       };
     });
   },

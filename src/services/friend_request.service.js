@@ -76,7 +76,7 @@ export const friendRequestService = {
         SELECT rm1.room_id FROM room_members rm1
         JOIN room_members rm2 ON rm1.room_id = rm2.room_id
         JOIN rooms r ON r.id = rm1.room_id
-        WHERE rm1.user_id = $1 AND rm2.user_id = $2 AND r.created_at >= NOW() - INTERVAL '24 hours'
+        WHERE rm1.user_id = $1 AND rm2.user_id = $2 AND (r.created_at >= NOW() - INTERVAL '24 hours' OR rm1.joined_at >= NOW() - INTERVAL '24 hours')
       ) matches LIMIT 1`,
       [userId1, userId2]
     );
