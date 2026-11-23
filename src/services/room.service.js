@@ -268,7 +268,15 @@ export const roomService = {
    * Item 4: Add connected: true/false to each member based on current socket connectivity
    */
   async getRoom(roomId) {
-    const roomRes = await pool.query('SELECT * FROM rooms WHERE id = $1', [roomId]);
+    if (!roomId) {
+      throw new ServiceError('Room identifier is required', 400);
+    }
+    const cleanId = String(roomId).trim();
+    const isCode = cleanId.length <= 8 && !cleanId.includes('-');
+    const query = isCode
+      ? 'SELECT * FROM rooms WHERE UPPER(TRIM(code)) = $1'
+      : 'SELECT * FROM rooms WHERE id::text = $1';
+    const roomRes = await pool.query(query, [isCode ? cleanId.toUpperCase() : cleanId]);
     const room = roomRes.rows[0];
     if (!room) {
       throw new ServiceError('Room not found', 404);
@@ -279,7 +287,7 @@ export const roomService = {
        FROM room_members
        WHERE room_id = $1 AND left_at IS NULL
        ORDER BY slot_index ASC`,
-      [roomId]
+      [room.id]
     );
 
     const members = membersRes.rows.map((m) => {

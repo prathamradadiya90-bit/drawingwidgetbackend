@@ -843,8 +843,23 @@ export function registerSocketEvents(socket, io) {
 
   // --- DISCONNECT ---
   socket.on('disconnect', async (reason) => {
-    const roomId = socket.data.roomId;
+    let roomId = socket.data.roomId;
     logger.info(`Socket disconnected: ${socket.id} (user: ${userId.slice(0, 8)}, reason: ${reason})`);
+    if (!roomId && !pool.ending) {
+      try {
+        const { rows } = await pool.query(
+          'SELECT room_id FROM room_members WHERE user_id = $1 AND left_at IS NULL ORDER BY joined_at DESC LIMIT 1',
+          [userId]
+        );
+        if (rows.length > 0) {
+          roomId = rows[0].room_id;
+        }
+      } catch (err) {
+        if (!err?.message?.includes('pool after calling end') && !pool.ending) {
+          logger.error('Error finding room on disconnect for user:', err);
+        }
+      }
+    }
     if (!roomId) return;
 
     // Check if user still has other open sockets in the same room (e.g. multiple tabs / rapid reconnect)
@@ -868,10 +883,12 @@ export function registerSocketEvents(socket, io) {
 
     // Immediately broadcast presence:leave so peers are notified that the member dropped connection
     try {
-      socket.to(roomId).emit(SocketEvents.PRESENCE_LEAVE, {
+      const leavePayload = {
         user_id: userId,
         reason: reason || 'disconnected',
-      });
+      };
+      io.of('/v1').to(roomId).emit(SocketEvents.PRESENCE_LEAVE, leavePayload);
+      io.to(roomId).emit(SocketEvents.PRESENCE_LEAVE, leavePayload);
       logger.info(`Broadcasted presence:leave for user ${userId.slice(0, 8)} in room ${roomId} (reason: ${reason})`);
     } catch (err) {
       logger.error('Error emitting presence:leave on disconnect:', err);
@@ -885,10 +902,12 @@ export function registerSocketEvents(socket, io) {
         logger.info(`Disconnect grace timeout reached: freed slot for user ${userId.slice(0, 8)} in room ${roomId}`);
 
         if (leaveResult.room_closed) {
-          socket.to(roomId).emit(SocketEvents.ROOM_CLOSED, {
+          const closePayload = {
             reason: 'HOST_DISCONNECTED',
             message: 'The host has disconnected. Room session ended.',
-          });
+          };
+          io.of('/v1').to(roomId).emit(SocketEvents.ROOM_CLOSED, closePayload);
+          io.to(roomId).emit(SocketEvents.ROOM_CLOSED, closePayload);
           cancelInvitesForGameRoom(io, { game: 'drawing', roomCode: leaveResult.room_code, reason: ErrorCodes.HOST_LEFT });
           clearPlayerInGame(io, userId).catch(() => {});
           if (leaveResult.other_user_ids) {
@@ -900,6 +919,30 @@ export function registerSocketEvents(socket, io) {
           clearPlayerInGame(io, userId).catch(() => {});
           if (leaveResult.host_id) {
             clearPlayerInGame(io, leaveResult.host_id).catch(() => {});
+          }
+          // Broadcast updated member list to room peers
+          try {
+            const { members: updatedMembers } = await roomService.getRoom(roomId);
+            const formattedMembers = (updatedMembers || []).map((m) => ({
+              user_id: m.user_id,
+              name: m.name,
+              profile_image: m.profile_image || null,
+              avatar_url: m.profile_image || null,
+              slot_index: m.slot_index,
+              connected: m.connected,
+            }));
+            io.of('/v1').to(roomId).emit(SocketEvents.ROOM_MEMBERS, {
+              room_id: roomId,
+              host_id: leaveResult.host_id,
+              members: formattedMembers,
+            });
+            io.to(roomId).emit(SocketEvents.ROOM_MEMBERS, {
+              room_id: roomId,
+              host_id: leaveResult.host_id,
+              members: formattedMembers,
+            });
+          } catch (err) {
+            logger.error('Error broadcasting updated room members after grace leave:', err);
           }
         }
       } catch (err) {
