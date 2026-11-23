@@ -443,7 +443,9 @@ export function registerSocketEvents(socket, io) {
       if (formattedMembers.length >= room.player_count) {
         cancelInvitesForGameRoom(io, { game: 'drawing', roomCode: room.code, reason: ErrorCodes.GAME_FULL });
         for (const m of formattedMembers) {
-          setPlayerInGame(io, m.user_id, 'drawing').catch(() => {});
+          setPlayerInGame(io, m.user_id, 'drawing').catch((err) => {
+            logger.error(`Error broadcasting drawing presence for ${m.user_id}:`, err);
+          });
         }
       }
 

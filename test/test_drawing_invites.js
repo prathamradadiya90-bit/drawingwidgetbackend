@@ -312,6 +312,11 @@ async function runTests() {
     console.log('✓ Friend room:join succeeded, slot 2 confirmed');
 
     await wait(200);
+    if (!presencePayload || presencePayload.status !== 'in_game' || presencePayload.game !== 'drawing') {
+      throw new Error(`Expected host to receive friend:presence with status: in_game and game: drawing, got: ${JSON.stringify(presencePayload)}`);
+    }
+    console.log(`✓ Host received friend:presence with status in_game, game drawing: ${JSON.stringify(presencePayload)}`);
+
     // Verify GET /rooms/:id has both members with connected: true
     const roomDetailsRes = await fetch(`${baseUrl}/api/v1/rooms/${room.id}`, {
       headers: {

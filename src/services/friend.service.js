@@ -76,7 +76,8 @@ function checkLookupRateLimit(userId) {
 const presenceMap = new Map();
 
 export function getUserPresence(userId) {
-  const entry = presenceMap.get(userId);
+  const normalizedUserId = String(userId || '').trim().toLowerCase();
+  const entry = presenceMap.get(normalizedUserId);
   if (!entry || entry.sockets.size === 0) {
     return {
       is_online: false,
@@ -105,15 +106,16 @@ export function getAllFriendsPresence(friendUserIds) {
 // Helper to broadcast presence change to all mutual friends of a user
 export async function broadcastPresenceToFriends(io, userId, status, game = null) {
   if (!io) return;
+  const normalizedUserId = String(userId || '').trim().toLowerCase();
   try {
     const { rows } = await pool.query(
-      `SELECT CASE WHEN user_a = $1 THEN user_b ELSE user_a END AS friend_id
+      `SELECT CASE WHEN LOWER(user_a) = $1 THEN LOWER(user_b) ELSE LOWER(user_a) END AS friend_id
        FROM friendships
-       WHERE user_a = $1 OR user_b = $1`,
-      [userId]
+       WHERE LOWER(user_a) = $1 OR LOWER(user_b) = $1`,
+      [normalizedUserId]
     );
 
-    const payload = { user_id: userId, status, game };
+    const payload = { user_id: normalizedUserId, status, game };
     for (const row of rows) {
       const friendRoom = `user:${row.friend_id}`;
       io.of('/v1').to(friendRoom).emit(SocketEvents.FRIEND_PRESENCE, payload);
@@ -129,10 +131,13 @@ export async function broadcastPresenceToFriends(io, userId, status, game = null
 
 // Handle socket connect for presence
 export async function handleSocketConnect(io, socket, userId) {
-  const personalRoom = `user:${userId}`;
-  socket.join(personalRoom);
+  const normalizedUserId = String(userId || '').trim().toLowerCase();
+  socket.join(`user:${normalizedUserId}`);
+  if (normalizedUserId !== userId) {
+    socket.join(`user:${userId}`);
+  }
 
-  let entry = presenceMap.get(userId);
+  let entry = presenceMap.get(normalizedUserId);
   if (entry) {
     if (entry.disconnectTimer) {
       clearTimeout(entry.disconnectTimer);
@@ -146,18 +151,18 @@ export async function handleSocketConnect(io, socket, userId) {
       sockets: new Set([socket.id]),
       disconnectTimer: null,
     };
-    presenceMap.set(userId, entry);
+    presenceMap.set(normalizedUserId, entry);
     // User newly came online: broadcast to friends
-    await broadcastPresenceToFriends(io, userId, 'online', null);
+    await broadcastPresenceToFriends(io, normalizedUserId, 'online', null);
   }
 
   // Send connecting user the list of all their friends' current presence
   try {
     const { rows } = await pool.query(
-      `SELECT CASE WHEN user_a = $1 THEN user_b ELSE user_a END AS friend_id
+      `SELECT CASE WHEN LOWER(user_a) = $1 THEN LOWER(user_b) ELSE LOWER(user_a) END AS friend_id
        FROM friendships
-       WHERE user_a = $1 OR user_b = $1`,
-      [userId]
+       WHERE LOWER(user_a) = $1 OR LOWER(user_b) = $1`,
+      [normalizedUserId]
     );
     const friendIds = rows.map((r) => r.friend_id);
     const friendsPresence = getAllFriendsPresence(friendIds);
@@ -169,7 +174,8 @@ export async function handleSocketConnect(io, socket, userId) {
 
 // Handle socket disconnect for presence
 export function handleSocketDisconnect(io, socket, userId) {
-  const entry = presenceMap.get(userId);
+  const normalizedUserId = String(userId || '').trim().toLowerCase();
+  const entry = presenceMap.get(normalizedUserId);
   if (!entry) return;
 
   entry.sockets.delete(socket.id);
@@ -178,39 +184,41 @@ export function handleSocketDisconnect(io, socket, userId) {
     if (entry.disconnectTimer) clearTimeout(entry.disconnectTimer);
     entry.disconnectTimer = setTimeout(async () => {
       // Grace period expired without re-connect -> user is offline
-      presenceMap.delete(userId);
-      await broadcastPresenceToFriends(io, userId, 'offline', null);
+      presenceMap.delete(normalizedUserId);
+      await broadcastPresenceToFriends(io, normalizedUserId, 'offline', null);
     }, FriendLimits.DISCONNECT_GRACE_MS);
   }
 }
 
 // Update user in_game presence
 export async function setPlayerInGame(io, userId, gameName) {
-  const entry = presenceMap.get(userId);
+  const normalizedUserId = String(userId || '').trim().toLowerCase();
+  const entry = presenceMap.get(normalizedUserId);
   if (entry) {
     entry.status = 'in_game';
     entry.game = gameName;
   } else {
-    presenceMap.set(userId, {
+    presenceMap.set(normalizedUserId, {
       status: 'in_game',
       game: gameName,
       sockets: new Set(),
       disconnectTimer: null,
     });
   }
-  await broadcastPresenceToFriends(io, userId, 'in_game', gameName);
+  await broadcastPresenceToFriends(io, normalizedUserId, 'in_game', gameName);
 }
 
 // Clear user in_game presence back to online
 export async function clearPlayerInGame(io, userId) {
-  const entry = presenceMap.get(userId);
+  const normalizedUserId = String(userId || '').trim().toLowerCase();
+  const entry = presenceMap.get(normalizedUserId);
   if (entry && entry.sockets.size > 0) {
     entry.status = 'online';
     entry.game = null;
-    await broadcastPresenceToFriends(io, userId, 'online', null);
+    await broadcastPresenceToFriends(io, normalizedUserId, 'online', null);
   } else {
-    presenceMap.delete(userId);
-    await broadcastPresenceToFriends(io, userId, 'offline', null);
+    presenceMap.delete(normalizedUserId);
+    await broadcastPresenceToFriends(io, normalizedUserId, 'offline', null);
   }
 }
 
@@ -327,14 +335,16 @@ export async function createGameInvite(io, { hostUserId, toUserId, game, roomCod
   const friendPresence = getUserPresence(normalizedToId);
   if (!friendPresence.is_online) {
     // Record missed invite with reason: "OFFLINE"
-    notificationService.recordMissedInvite(io, {
-      toUserId: normalizedToId,
-      fromUserId: normalizedHostId,
-      game: normalizedGame,
-      reason: 'OFFLINE',
-    }).catch((err) => {
+    try {
+      await notificationService.recordMissedInvite(io, {
+        toUserId: normalizedToId,
+        fromUserId: normalizedHostId,
+        game: normalizedGame,
+        reason: 'OFFLINE',
+      });
+    } catch (err) {
       logger.error('Failed to record offline missed invite:', err);
-    });
+    }
 
     throw new FriendServiceError(
       `${friendName} is offline. We'll let them know you invited them.`,
